@@ -38,15 +38,26 @@ export async function POST(req: Request) {
 
     // Build sheet context from workbook data sent from frontend (multi-sheet, multi-table, recent actions)
     let sheetContextMessage = "";
-    if (workbookData && Array.isArray(workbookData.sheets) && workbookData.sheets.length > 0) {
-      const activeSheet = workbookData.sheets.find((s: any) => s.isActive) || workbookData.sheets[0];
+    if (
+      workbookData &&
+      Array.isArray(workbookData.sheets) &&
+      workbookData.sheets.length > 0
+    ) {
+      const activeSheet =
+        workbookData.sheets.find((s: any) => s.isActive) ||
+        workbookData.sheets[0];
 
       const summarizeTables = (tables: any[]) => {
-        if (!Array.isArray(tables) || tables.length === 0) return "no tables detected";
+        if (!Array.isArray(tables) || tables.length === 0)
+          return "no tables detected";
         const parts = tables.slice(0, 3).map((t: any, i: number) => {
           const cols = Array.isArray(t.headers) ? t.headers.join(", ") : "";
-          const numerics = Array.isArray(t.numericColumns) ? ` | numeric: ${t.numericColumns.join(",")}` : "";
-          return `T${i + 1} ${t.range} (${t.recordCount} rows) [${cols}]${numerics}`;
+          const numerics = Array.isArray(t.numericColumns)
+            ? ` | numeric: ${t.numericColumns.join(",")}`
+            : "";
+          return `T${i + 1} ${t.range} (${
+            t.recordCount
+          } rows) [${cols}]${numerics}`;
         });
         const more = tables.length > 3 ? ` (+${tables.length - 3} more)` : "";
         return parts.join("; ") + more;
@@ -54,19 +65,34 @@ export async function POST(req: Request) {
 
       const multiSheetSummary = workbookData.sheets
         .slice(0, 5)
-        .map((s: any) => `- ${s.isActive ? "*" : ""}${s.name}: ${s.structure?.totalCells || 0} cells; tables: ${summarizeTables(s.tables)}`)
+        .map(
+          (s: any) =>
+            `- ${s.isActive ? "*" : ""}${s.name}: ${
+              s.structure?.totalCells || 0
+            } cells; tables: ${summarizeTables(s.tables)}`
+        )
         .join("\n");
 
       const recentActions = Array.isArray(workbookData.recentActions)
         ? workbookData.recentActions
             .slice(-10)
-            .map((a: any) => `• ${a.at}: ${a.tool}(${JSON.stringify(a.params)}) => ${a.result || "ok"}`)
+            .map(
+              (a: any) =>
+                `• ${a.at}: ${a.tool}(${JSON.stringify(a.params)}) => ${
+                  a.result || "ok"
+                }`
+            )
             .join("\n")
         : "none";
 
-      const inferredDataRange = activeSheet && Array.isArray(activeSheet.headers) && activeSheet.headers.length > 0
-        ? `A1:${String.fromCharCode(65 + activeSheet.headers.length - 1)}${activeSheet.structure?.dataRows || 50}`
-        : "A1:A1";
+      const inferredDataRange =
+        activeSheet &&
+        Array.isArray(activeSheet.headers) &&
+        activeSheet.headers.length > 0
+          ? `A1:${String.fromCharCode(65 + activeSheet.headers.length - 1)}${
+              activeSheet.structure?.dataRows || 50
+            }`
+          : "A1:A1";
 
       sheetContextMessage = `
 
@@ -90,7 +116,6 @@ Guidance:
     } else {
       console.log("⚠️ No workbook data received from frontend");
     }
-
 
     const result = streamText({
       model: openai("gpt-4o-mini"),
@@ -126,6 +151,7 @@ INTELLIGENT RESPONSES:
 
 TOOL SELECTION GUIDE:
 - "list columns" or "show columns" → Use list_columns tool
+- When there may be multiple tables, use list_tables first, then pass tableId or data_range to downstream tools
 - "sum column X" or "total column X" or just "do a sum" → Use calculate_total tool (automatically places sum in spreadsheet)
 - "create pivot table" or "group by X" → Use create_pivot_table tool (writes pivot table to spreadsheet)
 - "create chart" or "generate chart" → Use generate_chart tool
@@ -153,6 +179,9 @@ IMPORTANT: Tools now automatically write results to the spreadsheet:
 - format_cells applies formatting like bold, italic, colors to specified ranges
 - switch_sheet allows analyzing or switching between multiple sheets in the workbook
 
+DISAMBIGUATION POLICY:
+- If multiple tables are present and neither tableId nor data_range are provided for an operation, call list_tables and choose; otherwise ask for clarification.
+
 CHART INTELLIGENCE:
 - For time-series data (like Date + Search_Volume), automatically suggest line charts
 - For categorical data, suggest column or bar charts
@@ -165,6 +194,34 @@ Be professional, execute requests immediately, and provide specific insights bas
       messages,
       temperature: 0.2, // Lower temperature for more deterministic operations
       tools: {
+        list_tables: tool({
+          description: "List detected tables across sheets with headers, ranges, and a stable tableId",
+          parameters: z.object({}),
+          execute: async () => {
+            try {
+              const tables: any[] = [];
+              if (workbookData?.sheets?.length) {
+                for (let i = 0; i < workbookData.sheets.length; i++) {
+                  const s = workbookData.sheets[i];
+                  const sheetTables = Array.isArray(s.tables) ? s.tables : [];
+                  for (const t of sheetTables) {
+                    tables.push({
+                      tableId: `${i}:${t.range}`,
+                      sheetName: s.name,
+                      range: t.range,
+                      headers: t.headers,
+                      recordCount: t.recordCount,
+                      numericColumns: t.numericColumns || [],
+                    });
+                  }
+                }
+              }
+              return { tables };
+            } catch (e) {
+              return { tables: [] };
+            }
+          },
+        }),
         // === CORE SPREADSHEET TOOLS ===
         list_columns: tool({
           description: "Get column names and row count from the current sheet",
@@ -175,8 +232,8 @@ Be professional, execute requests immediately, and provide specific insights bas
               clientSideAction: {
                 type: "executeUniverTool",
                 toolName: "list_columns",
-                params: {}
-              }
+                params: {},
+              },
             };
           },
         }),
@@ -242,15 +299,17 @@ Be professional, execute requests immediately, and provide specific insights bas
               .string()
               .optional()
               .describe("Destination range (e.g., 'D1')"),
+            data_range: z.string().optional().describe("Optional source range like 'H1:I20'"),
+            tableId: z.string().optional().describe("Stable tableId from list_tables: '<sheetIndex>:<range>'"),
           }),
-          execute: async ({ groupBy, valueColumn, aggFunc, destination }) => {
+          execute: async ({ groupBy, valueColumn, aggFunc, destination, data_range, tableId }) => {
             return {
               message: `Creating pivot table grouping by '${groupBy}' with ${aggFunc} of '${valueColumn}'...`,
               clientSideAction: {
                 type: "executeUniverTool",
                 toolName: "create_pivot_table",
-                params: { groupBy, valueColumn, aggFunc, destination }
-              }
+                params: { groupBy, valueColumn, aggFunc, destination, data_range, tableId },
+              },
             };
           },
         }),
@@ -261,15 +320,17 @@ Be professional, execute requests immediately, and provide specific insights bas
             column: z
               .string()
               .describe("Column name or letter (e.g., 'Sales' or 'B')"),
+            data_range: z.string().optional().describe("Optional source range like 'H1:I20'"),
+            tableId: z.string().optional().describe("Stable tableId from list_tables: '<sheetIndex>:<range>'"),
           }),
-          execute: async ({ column }) => {
+          execute: async ({ column, data_range, tableId }) => {
             return {
               message: `Calculating total for column ${column}...`,
               clientSideAction: {
                 type: "executeUniverTool",
                 toolName: "calculate_total",
-                params: { column }
-              }
+                params: { column, data_range, tableId },
+              },
             };
           },
         }),
@@ -283,6 +344,7 @@ Be professional, execute requests immediately, and provide specific insights bas
               .describe(
                 "Data range (e.g., 'A1:B18') - if not provided, will auto-detect data"
               ),
+            tableId: z.string().optional().describe("Stable tableId from list_tables: '<sheetIndex>:<range>'"),
             chart_type: z
               .enum(["column", "line", "pie", "bar", "scatter"])
               .describe("Chart type - column, line, pie, bar, or scatter"),
@@ -300,25 +362,44 @@ Be professional, execute requests immediately, and provide specific insights bas
               .optional()
               .describe("Chart height in pixels (default: 300)"),
           }),
-          execute: async ({ data_range, chart_type, title, position, width = 400, height = 300 }) => {
+          execute: async ({
+            data_range,
+            tableId,
+            chart_type,
+            title,
+            position,
+            width = 400,
+            height = 300,
+          }) => {
             return {
               message: `Creating ${chart_type} chart "${title}"...`,
               clientSideAction: {
                 type: "executeUniverTool",
-                toolName: "generate_chart", 
-                params: { data_range, chart_type, title, position, width, height }
-              }
+                toolName: "generate_chart",
+                params: {
+                  data_range,
+                  tableId,
+                  chart_type,
+                  title,
+                  position,
+                  width,
+                  height,
+                },
+              },
             };
           },
         }),
 
         format_currency: tool({
-          description: "Format cells as currency (USD, EUR, GBP, etc.) with proper currency symbol",
+          description:
+            "Format cells as currency (USD, EUR, GBP, etc.) with proper currency symbol",
           parameters: z.object({
             range: z
               .string()
               .optional()
-              .describe("Cell range to format (e.g., 'F2:F4', 'A1:A10'). If not provided, will attempt to format the most recently calculated total."),
+              .describe(
+                "Cell range to format (e.g., 'F2:F4', 'A1:A10'). If not provided, will attempt to format the most recently calculated total."
+              ),
             currency: z
               .enum(["USD", "EUR", "GBP", "JPY", "CAD", "AUD"])
               .describe("Currency code (USD, EUR, GBP, etc.)"),
@@ -334,14 +415,15 @@ Be professional, execute requests immediately, and provide specific insights bas
               clientSideAction: {
                 type: "executeUniverTool",
                 toolName: "format_currency",
-                params: { range, currency, decimals }
-              }
+                params: { range, currency, decimals },
+              },
             };
           },
         }),
 
         format_cells: tool({
-          description: "Apply text and number formatting to cells (bold, colors, fonts, date formats, etc.) - NOT for currency formatting",
+          description:
+            "Apply text and number formatting to cells (bold, colors, fonts, date formats, etc.) - NOT for currency formatting",
           parameters: z.object({
             range: z
               .string()
@@ -361,7 +443,9 @@ Be professional, execute requests immediately, and provide specific insights bas
             numberFormat: z
               .string()
               .optional()
-              .describe("Number format pattern (e.g., 'MM/DD/YYYY' for dates, '0.00' for decimals)"),
+              .describe(
+                "Number format pattern (e.g., 'MM/DD/YYYY' for dates, '0.00' for decimals)"
+              ),
             textAlign: z
               .enum(["left", "center", "right"])
               .optional()
@@ -432,10 +516,9 @@ Be professional, execute requests immediately, and provide specific insights bas
                   backgroundColor ? ` (background: ${backgroundColor})` : ""
                 }${numberFormat ? ` (format: ${numberFormat})` : ""}${
                   textAlign ? ` (align: ${textAlign})` : ""
-                }${verticalAlign ? ` (vertical: ${verticalAlign})` : ""
-                }${textRotation ? ` (rotation: ${textRotation}°)` : ""
-                }${textWrap ? ` (wrap: ${textWrap})` : ""
-                }`,
+                }${verticalAlign ? ` (vertical: ${verticalAlign})` : ""}${
+                  textRotation ? ` (rotation: ${textRotation}°)` : ""
+                }${textWrap ? ` (wrap: ${textWrap})` : ""}`,
                 clientSideAction: {
                   type: "formatCells",
                   range,
@@ -483,53 +566,66 @@ Be professional, execute requests immediately, and provide specific insights bas
           }),
           execute: async ({ sheetName, action = "analyze" }) => {
             return {
-              message: `${action === "switch" ? "Switching to" : "Analyzing"} sheet "${sheetName}"...`,
+              message: `${
+                action === "switch" ? "Switching to" : "Analyzing"
+              } sheet "${sheetName}"...`,
               clientSideAction: {
                 type: "executeUniverTool",
                 toolName: "switch_sheet",
-                params: { sheetName, action }
-              }
+                params: { sheetName, action },
+              },
             };
           },
         }),
 
         add_filter: tool({
-          description: "Add filter to spreadsheet data to show/hide specific rows based on criteria",
+          description:
+            "Add filter to spreadsheet data to show/hide specific rows based on criteria",
           parameters: z.object({
             range: z
               .string()
               .optional()
-              .describe("Data range to filter (e.g., 'A1:G51'). If not provided, will auto-detect data range"),
+              .describe(
+                "Data range to filter (e.g., 'A1:G51'). If not provided, will auto-detect data range"
+              ),
             column: z
               .string()
               .optional()
-              .describe("Specific column to filter (e.g., 'Region', 'Product', or 'C')"),
+              .describe(
+                "Specific column to filter (e.g., 'Region', 'Product', or 'C')"
+              ),
             filterValues: z
               .array(z.string())
               .optional()
-              .describe("Values to show (e.g., ['North', 'South'] to show only North and South regions)"),
+              .describe(
+                "Values to show (e.g., ['North', 'South'] to show only North and South regions)"
+              ),
             action: z
               .enum(["add", "remove", "clear"])
               .optional()
               .default("add")
-              .describe("Action: 'add' creates filter, 'remove' removes specific filter, 'clear' removes all filters"),
+              .describe(
+                "Action: 'add' creates filter, 'remove' removes specific filter, 'clear' removes all filters"
+              ),
           }),
           execute: async ({ range, column, filterValues, action = "add" }) => {
             return {
-              message: action === "add" 
-                ? `Adding filter${column ? ` on column ${column}` : ''}${filterValues ? ` showing: ${filterValues.join(', ')}` : ''}...`
-                : action === "remove" 
-                ? `Removing filter${column ? ` on column ${column}` : ''}...`
-                : `Clearing all filters...`,
+              message:
+                action === "add"
+                  ? `Adding filter${column ? ` on column ${column}` : ""}${
+                      filterValues ? ` showing: ${filterValues.join(", ")}` : ""
+                    }...`
+                  : action === "remove"
+                  ? `Removing filter${column ? ` on column ${column}` : ""}...`
+                  : `Clearing all filters...`,
               clientSideAction: {
                 type: "executeUniverTool",
                 toolName: "add_filter",
-                params: { range, column, filterValues, action }
-              }
+                params: { range, column, filterValues, action },
+              },
             };
           },
         }),
-
       },
       maxSteps: 5,
     });

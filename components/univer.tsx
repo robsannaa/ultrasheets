@@ -81,7 +81,11 @@ export function Univer() {
         : mergeLocales(sheetsCoreEnUS);
 
       // If already initialized (HMR / re-render), reuse existing API
-      if (typeof window !== "undefined" && window.__ultraUniverInitialized && window.__ultraUniverAPI) {
+      if (
+        typeof window !== "undefined" &&
+        window.__ultraUniverInitialized &&
+        window.__ultraUniverAPI
+      ) {
         // Re-bind tool executor and exit early
         const univerAPI = window.__ultraUniverAPI;
         (window as any).univerAPI = univerAPI;
@@ -110,7 +114,9 @@ export function Univer() {
             throw error;
           }
         };
-        console.log("🎯 Univer component: Reusing existing univerAPI (guarded re-init)");
+        console.log(
+          "🎯 Univer component: Reusing existing univerAPI (guarded re-init)"
+        );
         return;
       }
 
@@ -337,6 +343,19 @@ export function Univer() {
         }
       };
 
+      // Helpers for range/column parsing
+      const parseA1Range = (a1: string) => {
+        const [start, end] = a1.split(":");
+        const colToIndex = (s: string) => s.toUpperCase().charCodeAt(0) - 65; // A=0
+        const startCol = colToIndex(start.replace(/\d+/g, ""));
+        const startRow = parseInt(start.replace(/\D+/g, ""), 10) - 1; // 0-based
+        const endCol = colToIndex(end.replace(/\d+/g, ""));
+        const endRow = parseInt(end.replace(/\D+/g, ""), 10) - 1;
+        return { startRow, startCol, endRow, endCol };
+      };
+
+      const colLetterToOffset = (letter: string) => letter.toUpperCase().charCodeAt(0) - 65; // A=0
+
       const executeCalculateTotal = async (params: any) => {
         console.log("🔍 calculate_total: Starting execution...", params);
 
@@ -362,7 +381,7 @@ export function Univer() {
           "✅ calculate_total: Univer is ready, accessing worksheet data..."
         );
 
-        const { column } = params;
+        const { column, data_range, tableId } = params;
 
         try {
           // Get worksheet snapshot using proper Univer API
@@ -377,20 +396,31 @@ export function Univer() {
 
           const cellData = sheetSnapshot.cellData;
 
+          // If a data_range or tableId is provided, restrict detection to that range
+          let scopedStartRow = 0;
+          let scopedEndRow = sheetSnapshot.rowCount || 1000;
+          let scopedStartCol = 0;
+          let scopedEndCol = (sheetSnapshot.columnCount || 26) - 1;
+
+          const scopedRange = data_range || (tableId && String(tableId).split(":")[1]);
+          if (scopedRange && /^[A-Z]+\d+:[A-Z]+\d+$/i.test(scopedRange)) {
+            const { startRow, endRow, startCol, endCol } = parseA1Range(scopedRange);
+            scopedStartRow = startRow;
+            scopedEndRow = endRow;
+            scopedStartCol = startCol;
+            scopedEndCol = endCol;
+          }
+
           // Find headers using the same logic as list_columns
           const headers: string[] = [];
           let headerRow = -1;
 
           // Find the row with the most consecutive text values (likely headers)
-          for (
-            let row = 0;
-            row < Math.min(5, sheetSnapshot.rowCount || 5);
-            row++
-          ) {
+          for (let row = scopedStartRow; row <= Math.min(scopedStartRow + 4, scopedEndRow); row++) {
             const rowData = cellData[row] || {};
             const tempColumns: string[] = [];
 
-            for (let col = 0; col < (sheetSnapshot.columnCount || 26); col++) {
+            for (let col = scopedStartCol; col <= scopedEndCol; col++) {
               const cell = rowData[col];
               if (
                 cell &&
@@ -411,7 +441,7 @@ export function Univer() {
               tempColumns.length >= 2
             ) {
               headers.splice(0, headers.length, ...tempColumns);
-              headerRow = row;
+              headerRow = row; // absolute row index
             }
           }
 
@@ -420,13 +450,13 @@ export function Univer() {
           // Find column index
           let columnIndex = -1;
           if (/^[A-Z]+$/.test(column)) {
-            // Column letter provided (e.g., 'B')
-            columnIndex = column.charCodeAt(0) - 65; // A=0, B=1, etc.
+            // Interpret column letters relative to scoped range if provided
+            const offset = colLetterToOffset(column);
+            columnIndex = scopedStartCol + offset;
           } else {
             // Column name provided (e.g., 'Search_Volume')
-            columnIndex = headers.findIndex((h) =>
-              h.toLowerCase().includes(column.toLowerCase())
-            );
+            const relIdx = headers.findIndex((h) => h.toLowerCase().includes(column.toLowerCase()));
+            if (relIdx >= 0) columnIndex = scopedStartCol + relIdx;
           }
 
           if (columnIndex === -1) {
@@ -451,7 +481,7 @@ export function Univer() {
           const dataStartRow = headerRow + 1;
           for (
             let row = dataStartRow;
-            row < (sheetSnapshot.rowCount || 1000);
+            row <= scopedEndRow;
             row++
           ) {
             const rowData = cellData[row];
@@ -482,11 +512,7 @@ export function Univer() {
           let lastDataRow = dataStartRow;
           let existingSumRow = -1;
 
-          for (
-            let row = dataStartRow;
-            row < (sheetSnapshot.rowCount || 1000);
-            row++
-          ) {
+          for (let row = dataStartRow; row <= scopedEndRow; row++) {
             const rowData = cellData[row];
             if (rowData && rowData[columnIndex]) {
               const cell = rowData[columnIndex];
@@ -579,7 +605,7 @@ export function Univer() {
           throw new Error("Univer API not available");
         }
 
-        const { groupBy, valueColumn, aggFunc, destination } = params;
+        const { groupBy, valueColumn, aggFunc, destination, data_range, tableId } = params;
 
         try {
           const workbook = univerAPI.getActiveWorkbook();
@@ -596,19 +622,38 @@ export function Univer() {
 
           const cellData = sheetSnapshot.cellData;
 
+          // Scope to range if provided
+          const parseA1Range = (a1: string) => {
+            const [start, end] = a1.split(":");
+            const colToIndex = (s: string) => s.toUpperCase().charCodeAt(0) - 65; // A=0
+            const startCol = colToIndex(start.replace(/\d+/g, ""));
+            const startRow = parseInt(start.replace(/\D+/g, ""), 10) - 1; // 0-based
+            const endCol = colToIndex(end.replace(/\d+/g, ""));
+            const endRow = parseInt(end.replace(/\D+/g, ""), 10) - 1;
+            return { startRow, startCol, endRow, endCol };
+          };
+          let scopedStartRow = 0;
+          let scopedEndRow = sheetSnapshot.rowCount || 1000;
+          let scopedStartCol = 0;
+          let scopedEndCol = (sheetSnapshot.columnCount || 26) - 1;
+          const scopedRange = data_range || (tableId && String(tableId).split(":")[1]);
+          if (scopedRange && /^[A-Z]+\d+:[A-Z]+\d+$/i.test(scopedRange)) {
+            const { startRow, endRow, startCol, endCol } = parseA1Range(scopedRange);
+            scopedStartRow = startRow;
+            scopedEndRow = endRow;
+            scopedStartCol = startCol;
+            scopedEndCol = endCol;
+          }
+
           // Find headers using same logic as other tools
           const headers: string[] = [];
           let headerRow = -1;
 
-          for (
-            let row = 0;
-            row < Math.min(5, sheetSnapshot.rowCount || 5);
-            row++
-          ) {
+          for (let row = scopedStartRow; row <= Math.min(scopedStartRow + 4, scopedEndRow); row++) {
             const rowData = cellData[row] || {};
             const tempColumns: string[] = [];
 
-            for (let col = 0; col < (sheetSnapshot.columnCount || 26); col++) {
+            for (let col = scopedStartCol; col <= scopedEndCol; col++) {
               const cell = rowData[col];
               if (cell && typeof cell.v === "string" && !cell.f) {
                 tempColumns.push(String(cell.v));
@@ -660,12 +705,7 @@ export function Univer() {
           // Create pivot from data
           const pivotMap = new Map<string, number[]>();
           const dataStartRow = headerRow + 1;
-
-          for (
-            let row = dataStartRow;
-            row < (sheetSnapshot.rowCount || 1000);
-            row++
-          ) {
+          for (let row = dataStartRow; row <= scopedEndRow; row++) {
             const rowData = cellData[row];
             if (rowData) {
               const groupValue = rowData[groupByIndex]?.v;
@@ -766,6 +806,7 @@ export function Univer() {
 
         const {
           data_range,
+          tableId,
           chart_type,
           title,
           position,
@@ -780,14 +821,14 @@ export function Univer() {
           }
           const worksheet = workbook.getActiveSheet();
 
-          // Get worksheet snapshot
+        // Get worksheet snapshot
           const sheetSnapshot = worksheet.getSheet().getSnapshot();
           if (!sheetSnapshot || !sheetSnapshot.cellData) {
             throw new Error("No data found in spreadsheet");
           }
 
-          // Auto-detect data range if not provided
-          let finalDataRange = data_range;
+        // Auto-detect data range if not provided; honor tableId if present
+        let finalDataRange = data_range || (tableId && String(tableId).split(":")[1]);
           if (!finalDataRange) {
             // Find headers first
             const cellData = sheetSnapshot.cellData;
