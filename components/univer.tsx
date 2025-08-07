@@ -244,7 +244,7 @@ export function Univer() {
           execute_add_filter: executeAddFilter,
           execute_conditional_formatting: executeConditionalFormatting,
           execute_auto_fit_columns: executeAutoFitColumns,
-        execute_find_cell: executeFindCell,
+          execute_find_cell: executeFindCell,
         };
         (window as any).__ultraToolFns = __toolFns;
         window.executeUniverTool = async (toolName: string, params?: any) => {
@@ -394,6 +394,74 @@ export function Univer() {
         const { columns, rowsSampleLimit = 1000 } = params || {};
         const colIndexes = parseColumns(String(columns || "A"));
 
+        // First try built-in command: sheet.command.set-col-auto-width (Fit for data)
+        const tryBuiltinCommand = async (cols: number[]) => {
+          try {
+            const cmdMgr = (univerAPI as any).getCommandManager?.();
+            const sheet = fWorksheet?.getSheet?.();
+            const unitId = fWorkbook?.getUnitId?.() || fWorkbook?.getId?.();
+            const sheetId = sheet?.getSheetId?.() || sheet?.getId?.();
+            if (!cmdMgr?.executeCommand || unitId == null || sheetId == null)
+              return false;
+
+            // Group contiguous columns and issue fewer commands
+            const sorted = [...cols].sort((a, b) => a - b);
+            const ranges: Array<{ start: number; end: number }> = [];
+            let start = sorted[0];
+            let prev = sorted[0];
+            for (let i = 1; i < sorted.length; i++) {
+              const v = sorted[i];
+              if (v === prev + 1) {
+                prev = v;
+              } else {
+                ranges.push({ start, end: prev });
+                start = prev = v;
+              }
+            }
+            if (start != null) ranges.push({ start, end: prev });
+
+            for (const r of ranges) {
+              // Payload shape can differ across versions; try a few common shapes
+              const payloads = [
+                { unitId, subUnitId: sheetId, col: { start: r.start, end: r.end } },
+                { unitId, sheetId, col: { start: r.start, end: r.end } },
+                { unitId, worksheetId: sheetId, range: { start: r.start, end: r.end } },
+              ];
+              let ok = false;
+              for (const p of payloads) {
+                try {
+                  const res = await cmdMgr.executeCommand(
+                    "sheet.command.set-col-auto-width",
+                    p
+                  );
+                  if (res) {
+                    ok = true;
+                    break;
+                  }
+                } catch {
+                  // try next payload shape
+                }
+              }
+              if (!ok) return false;
+            }
+            return true;
+          } catch {
+            return false;
+          }
+        };
+
+        // Try built-in first; if not available, fall back to heuristic
+        const usedBuiltin = await tryBuiltinCommand(colIndexes);
+
+        if (usedBuiltin) {
+          return {
+            success: true,
+            message: `Auto-fitted columns ${columns}`,
+            columns: colIndexes,
+            method: "command",
+          };
+        }
+
         // Snapshot data
         const snapshot = fWorksheet.getSheet().getSnapshot();
         const cellData = snapshot?.cellData || {};
@@ -436,6 +504,7 @@ export function Univer() {
           success: true,
           message: `Auto-fitted columns ${columns}`,
           columns: colIndexes,
+          method: "heuristic",
         };
       };
 
@@ -445,7 +514,10 @@ export function Univer() {
         const fWorkbook: any = univerAPI.getActiveWorkbook();
         if (!fWorkbook) throw new Error("No active workbook available");
         const fWorksheet: any = sheetName
-          ? fWorkbook.getSheets().find((s: any) => s.getName?.() === sheetName) || fWorkbook.getActiveSheet()
+          ? fWorkbook
+              .getSheets()
+              .find((s: any) => s.getName?.() === sheetName) ||
+            fWorkbook.getActiveSheet()
           : fWorkbook.getActiveSheet();
 
         const snap = fWorksheet.getSheet().getSnapshot();
@@ -460,10 +532,7 @@ export function Univer() {
           const cKeys = Object.keys(row);
           for (const cKey of cKeys) {
             const c = Number(cKey);
-            if (
-              typeof colIndexFilter === "number" &&
-              c !== colIndexFilter
-            )
+            if (typeof colIndexFilter === "number" && c !== colIndexFilter)
               continue;
             const v = row[c]?.v;
             if (v == null) continue;
@@ -471,7 +540,11 @@ export function Univer() {
             const ok = match === "contains" ? s.includes(text) : s === text;
             if (ok) {
               const addr = `${String.fromCharCode(65 + c)}${r + 1}`;
-              return { success: true, address: addr, sheet: fWorksheet.getName?.() };
+              return {
+                success: true,
+                address: addr,
+                sheet: fWorksheet.getName?.(),
+              };
             }
           }
         }
