@@ -22,7 +22,7 @@ declare global {
 
 export function Univer() {
   const containerRef = useRef<HTMLDivElement>(null!);
-  const { theme } = useTheme();
+  const { resolvedTheme } = useTheme();
   useEffect(() => {
     // Dynamic imports to avoid SSR issues
     const initializeUniver = async () => {
@@ -150,7 +150,10 @@ export function Univer() {
       ) {
         // Remove Univer watermark if API available (HMR-safe)
         try {
-          if (typeof (window.__ultraUniverAPI as any).removeWatermark === "function") {
+          if (
+            typeof (window.__ultraUniverAPI as any).removeWatermark ===
+            "function"
+          ) {
             (window.__ultraUniverAPI as any).removeWatermark();
           }
         } catch {}
@@ -197,8 +200,8 @@ export function Univer() {
           [LocaleType.EN_US]: locales,
         },
         presets,
-        darkMode: theme === "dark",
-        theme: theme === "dark" ? greenTheme : defaultTheme,
+        darkMode: resolvedTheme === "dark",
+        theme: resolvedTheme === "dark" ? greenTheme : defaultTheme,
       });
 
       // Remove Univer watermark if API available
@@ -225,7 +228,7 @@ export function Univer() {
         // Sync dark mode on mount and when theme changes
         try {
           if (typeof univerAPI.toggleDarkMode === "function") {
-            univerAPI.toggleDarkMode(theme === "dark");
+            univerAPI.toggleDarkMode(resolvedTheme === "dark");
           }
         } catch {}
       } catch {}
