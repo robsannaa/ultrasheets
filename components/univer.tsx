@@ -148,6 +148,13 @@ export function Univer() {
         window.__ultraUniverInitialized &&
         window.__ultraUniverAPI
       ) {
+        // Remove Univer watermark if API available (HMR-safe)
+        try {
+          if (typeof (window.__ultraUniverAPI as any).removeWatermark === "function") {
+            (window.__ultraUniverAPI as any).removeWatermark();
+          }
+        } catch {}
+
         // Re-bind tool executor and exit early
         const univerAPI = window.__ultraUniverAPI;
         (window as any).univerAPI = univerAPI;
@@ -193,6 +200,13 @@ export function Univer() {
         darkMode: theme === "dark",
         theme: theme === "dark" ? greenTheme : defaultTheme,
       });
+
+      // Remove Univer watermark if API available
+      try {
+        if (typeof (univerAPI as any).removeWatermark === "function") {
+          (univerAPI as any).removeWatermark();
+        }
+      } catch {}
 
       // Force initial formula computing at lifecycle Starting for future workbooks
       try {
@@ -365,7 +379,9 @@ export function Univer() {
 
         return {
           success: true,
-          message: `Added conditional formatting on ${range} (${ruleType || "number_lt 0"})`,
+          message: `Added conditional formatting on ${range} (${
+            ruleType || "number_lt 0"
+          })`,
           range,
           ruleType: ruleType || "number_lt",
         };
