@@ -76,12 +76,12 @@ export function Univer() {
       }
 
       const corePreset = UniverSheetsCorePreset({
-          container: containerRef.current,
-          // Ensure formulas compute deterministically on load
-          formula: {
-            initialFormulaComputing: CalculationMode.FORCED,
-          },
-        });
+        container: containerRef.current,
+        // Ensure formulas compute deterministically on load
+        formula: {
+          initialFormulaComputing: CalculationMode.FORCED,
+        },
+      });
 
       // Build presets in a way that allows graceful fallback if advanced/drawing cause injector errors
       let presets: any[] = [corePreset];
@@ -93,7 +93,10 @@ export function Univer() {
           UniverSheetsAdvancedPreset(),
         ];
       } catch (e) {
-        console.warn("⚠️ Failed to prepare chart presets; continuing with core only.", e);
+        console.warn(
+          "⚠️ Failed to prepare chart presets; continuing with core only.",
+          e
+        );
         presets = [corePreset];
       }
 
@@ -111,11 +114,7 @@ export function Univer() {
               sheetsAdvancedEnUS,
               filterLocales
             )
-          : mergeLocales(
-              sheetsCoreEnUS,
-              sheetsDrawingEnUS,
-              sheetsAdvancedEnUS
-            );
+          : mergeLocales(sheetsCoreEnUS, sheetsDrawingEnUS, sheetsAdvancedEnUS);
       } catch (e) {
         console.warn(
           "⚠️ Failed to merge locales for chart presets; using core locales only.",
@@ -662,6 +661,7 @@ export function Univer() {
           valueColumn,
           aggFunc,
           destination,
+          sheetName,
           data_range,
           tableId,
         } = params;
@@ -671,7 +671,20 @@ export function Univer() {
           if (!workbook) {
             throw new Error("No active workbook available");
           }
-          const worksheet = workbook.getActiveSheet();
+          let worksheet: any = workbook.getActiveSheet();
+          // Create/switch sheet if requested
+          try {
+            if (sheetName && typeof (workbook as any).getSheetByName === "function") {
+              const existing = (workbook as any).getSheetByName(sheetName);
+              if (existing) {
+                worksheet = existing;
+              } else if (typeof (workbook as any).insertSheet === "function") {
+                worksheet = (workbook as any).insertSheet(sheetName);
+              }
+            }
+          } catch (e) {
+            console.warn("⚠️ Sheet create/switch not supported:", e);
+          }
 
           // Get worksheet snapshot
           const sheetSnapshot = worksheet.getSheet().getSnapshot();
@@ -819,7 +832,8 @@ export function Univer() {
           pivotData.sort((a, b) => a.group.localeCompare(b.group));
 
           // Write pivot table to destination
-          const destCell = destination || "H2";
+          let destCell = destination || "H2";
+          if (destCell.includes("!")) destCell = destCell.split("!")[1];
           const [destCol, destRow] = [
             destCell.charCodeAt(0) - 65,
             parseInt(destCell.slice(1)) - 1,

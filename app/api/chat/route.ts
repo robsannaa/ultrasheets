@@ -305,7 +305,11 @@ Be professional, execute requests immediately, and provide specific insights bas
             destination: z
               .string()
               .optional()
-              .describe("Destination range (e.g., 'D1')"),
+              .describe("Destination range (e.g., 'D1' or 'Sheet2!A1')"),
+            sheetName: z
+              .string()
+              .optional()
+              .describe("Optional sheet name to create/use for the pivot table"),
             data_range: z
               .string()
               .optional()
@@ -322,6 +326,7 @@ Be professional, execute requests immediately, and provide specific insights bas
             valueColumn,
             aggFunc,
             destination,
+            sheetName,
             data_range,
             tableId,
           }) => {
@@ -335,6 +340,7 @@ Be professional, execute requests immediately, and provide specific insights bas
                   valueColumn,
                   aggFunc,
                   destination,
+                  sheetName,
                   data_range,
                   tableId,
                 },
