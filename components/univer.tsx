@@ -243,6 +243,7 @@ export function Univer() {
           execute_switch_sheet: executeSwitchSheet,
           execute_add_filter: executeAddFilter,
           execute_conditional_formatting: executeConditionalFormatting,
+        execute_auto_fit_columns: executeAutoFitColumns,
         };
         (window as any).__ultraToolFns = __toolFns;
         window.executeUniverTool = async (toolName: string, params?: any) => {
@@ -360,6 +361,76 @@ export function Univer() {
           })`,
           range,
           ruleType: ruleType || "number_lt",
+        };
+      };
+
+      const executeAutoFitColumns = async (params: any) => {
+        if (!univerAPI) throw new Error("Univer API not available");
+        const fWorkbook: any = univerAPI.getActiveWorkbook();
+        if (!fWorkbook) throw new Error("No active workbook available");
+        const fWorksheet: any = fWorkbook.getActiveSheet();
+
+        const parseColumns = (spec: string): number[] => {
+          const cols: number[] = [];
+          const parts = spec.split(",").map((s) => s.trim()).filter(Boolean);
+          for (const p of parts) {
+            if (/^[A-Za-z]+:[A-Za-z]+$/.test(p)) {
+              const [a, b] = p.split(":");
+              const s = a.toUpperCase().charCodeAt(0) - 65;
+              const e = b.toUpperCase().charCodeAt(0) - 65;
+              const [start, end] = s <= e ? [s, e] : [e, s];
+              for (let i = start; i <= end; i++) cols.push(i);
+            } else if (/^[A-Za-z]+$/.test(p)) {
+              cols.push(p.toUpperCase().charCodeAt(0) - 65);
+            }
+          }
+          return Array.from(new Set(cols)).filter((i) => i >= 0);
+        };
+
+        const { columns, rowsSampleLimit = 1000 } = params || {};
+        const colIndexes = parseColumns(String(columns || "A"));
+
+        // Snapshot data
+        const snapshot = fWorksheet.getSheet().getSnapshot();
+        const cellData = snapshot?.cellData || {};
+        const maxRow = Math.min(rowsSampleLimit, snapshot?.rowCount || 10000);
+
+        // Rough width heuristic: use header + top N rows text length, convert to px
+        const toPx = (len: number) => Math.min(600, Math.max(40, Math.round(len * 7.2 + 16))); // 7.2px/char + padding
+
+        for (const col of colIndexes) {
+          let maxChars = 0;
+          // header row(s): scan first 2 rows for potential header text
+          for (let r = 0; r < Math.min(2, maxRow); r++) {
+            const v = cellData[r]?.[col]?.v;
+            if (v != null) maxChars = Math.max(maxChars, String(v).length);
+          }
+          // sample data rows
+          for (let r = 2; r < maxRow; r++) {
+            const v = cellData[r]?.[col]?.v;
+            if (v != null) maxChars = Math.max(maxChars, String(v).length);
+          }
+
+          const px = toPx(maxChars);
+          try {
+            if (typeof fWorksheet.setColumnWidth === "function") {
+              fWorksheet.setColumnWidth(col, px);
+            } else if (typeof fWorksheet.getRange === "function") {
+              // Fallback: try range style width if supported (some builds expose it)
+              const range = fWorksheet.getRange(0, col, 1, 1) as any;
+              if (range && typeof range.setColumnWidth === "function") {
+                range.setColumnWidth(px);
+              }
+            }
+          } catch (e) {
+            console.warn("⚠️ setColumnWidth not available:", e);
+          }
+        }
+
+        return {
+          success: true,
+          message: `Auto-fitted columns ${columns}`,
+          columns: colIndexes,
         };
       };
       const executeListColumns = async () => {

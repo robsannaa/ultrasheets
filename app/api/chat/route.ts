@@ -629,7 +629,9 @@ Be professional, execute requests immediately, and provide specific insights bas
                 "duplicate",
               ])
               .optional()
-              .describe("Type of rule. Defaults to negative values red (number_lt 0)"),
+              .describe(
+                "Type of rule. Defaults to negative values red (number_lt 0)"
+              ),
             min: z.number().optional(),
             max: z.number().optional(),
             equals: z.number().optional(),
@@ -637,8 +639,14 @@ Be professional, execute requests immediately, and provide specific insights bas
             startsWith: z.string().optional(),
             endsWith: z.string().optional(),
             formula: z.string().optional(),
-            background: z.string().optional().describe("Background color (e.g., '#FF0000')"),
-            fontColor: z.string().optional().describe("Font color (e.g., '#00FF00')"),
+            background: z
+              .string()
+              .optional()
+              .describe("Background color (e.g., '#FF0000')"),
+            fontColor: z
+              .string()
+              .optional()
+              .describe("Font color (e.g., '#00FF00')"),
             bold: z.boolean().optional(),
             italic: z.boolean().optional(),
           }),
@@ -726,6 +734,33 @@ Be professional, execute requests immediately, and provide specific insights bas
                 type: "executeUniverTool",
                 toolName: "add_filter",
                 params: { range, column, filterValues, action },
+              },
+            };
+          },
+        }),
+
+        auto_fit_columns: tool({
+          description:
+            "Auto-fit one or more columns to their content width (like double-clicking column edge in Excel)",
+          parameters: z.object({
+            columns: z
+              .string()
+              .describe(
+                "Columns to fit: 'A' for single, 'A:C' for range, or comma-separated like 'A,C,E'"
+              ),
+            rowsSampleLimit: z
+              .number()
+              .optional()
+              .default(1000)
+              .describe("Max rows to sample for measuring content (default 1000)"),
+          }),
+          execute: async ({ columns, rowsSampleLimit = 1000 }) => {
+            return {
+              message: `Auto-fitting columns ${columns}...`,
+              clientSideAction: {
+                type: "executeUniverTool",
+                toolName: "auto_fit_columns",
+                params: { columns, rowsSampleLimit },
               },
             };
           },
