@@ -61,7 +61,10 @@ function ChatMessages({
                   {(() => {
                     try {
                       const text = message.parts
-                        .filter((p: any) => p.type === "text" && typeof p.text === "string")
+                        .filter(
+                          (p: any) =>
+                            p.type === "text" && typeof p.text === "string"
+                        )
                         .map((p: any) => p.text)
                         .join("");
                       return text ? (
@@ -72,71 +75,74 @@ function ChatMessages({
                     }
                   })()}
                   {message.parts.map((part: any, index: number) => {
-                  switch (part.type) {
-                    case "text":
-                      return null; // already rendered once above
-                    case "tool-invocation": {
-                      const callId = part.toolInvocation.toolCallId;
-                      const toolName = part.toolInvocation.toolName;
-                      const state = part.toolInvocation.state;
-                      const args = part.toolInvocation.args;
-                      const label = describeTool(toolName, args);
+                    switch (part.type) {
+                      case "text":
+                        return null; // already rendered once above
+                      case "tool-invocation": {
+                        const callId = part.toolInvocation.toolCallId;
+                        const toolName = part.toolInvocation.toolName;
+                        const state = part.toolInvocation.state;
+                        const args = part.toolInvocation.args;
+                        const label = describeTool(toolName, args);
 
-                      if (state === "call") {
-                        if (toolName === "get_sheet_context") return null;
-                        return (
-                          <ToolBadge
-                            key={callId}
-                            label={label}
-                            toolName={toolName}
-                            state="call"
-                          />
-                        );
-                      } else if (state === "result") {
-                        // Only show result for important operations, hide technical details
-                        const result = part.toolInvocation.result;
-                        if (toolName === "get_sheet_context") {
-                          return null; // Hide sheet context results - too technical
-                        }
-
-                        // Handle new error response format
-                        if (
-                          result &&
-                          typeof result === "object" &&
-                          result.error
-                        ) {
+                        if (state === "call") {
+                          if (toolName === "get_sheet_context") return null;
                           return (
-                            <div key={callId} className="text-red-600 text-sm">
-                              ⚠️ {result.message || result.error}
+                            <ToolBadge
+                              key={callId}
+                              label={label}
+                              toolName={toolName}
+                              state="call"
+                            />
+                          );
+                        } else if (state === "result") {
+                          // Only show result for important operations, hide technical details
+                          const result = part.toolInvocation.result;
+                          if (toolName === "get_sheet_context") {
+                            return null; // Hide sheet context results - too technical
+                          }
+
+                          // Handle new error response format
+                          if (
+                            result &&
+                            typeof result === "object" &&
+                            result.error
+                          ) {
+                            return (
+                              <div
+                                key={callId}
+                                className="text-red-600 text-sm"
+                              >
+                                ⚠️ {result.message || result.error}
+                              </div>
+                            );
+                          }
+                          return (
+                            <ToolBadge
+                              key={callId}
+                              label={label}
+                              toolName={toolName}
+                              state="result"
+                            />
+                          );
+                        }
+                        return null;
+                      }
+                      default:
+                        if (message.role === "assistant" && message.content) {
+                          return (
+                            <div
+                              key={index}
+                              className="leading-6 prose prose-sm max-w-none dark:prose-invert"
+                            >
+                              <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                                {message.content}
+                              </ReactMarkdown>
                             </div>
                           );
                         }
-                        return (
-                          <ToolBadge
-                            key={callId}
-                            label={label}
-                            toolName={toolName}
-                            state="result"
-                          />
-                        );
-                      }
-                      return null;
+                        return null;
                     }
-                    default:
-                      if (message.role === "assistant" && message.content) {
-                        return (
-                          <div
-                            key={index}
-                            className="leading-6 prose prose-sm max-w-none dark:prose-invert"
-                          >
-                            <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                              {message.content}
-                            </ReactMarkdown>
-                          </div>
-                        );
-                      }
-                      return null;
-                  }
                   })}
                 </>
               ) : message.role === "assistant" ? (
@@ -895,7 +901,20 @@ export function ChatSidebar() {
     }
   };
 
-  const isLoading = status === "submitted" || status === "streaming";
+  // Smart typing indicator: show only until first assistant tokens arrive
+  const lastMsg: any = messages[messages.length - 1];
+  const assistantHasContent =
+    lastMsg?.role === "assistant" &&
+    ((Array.isArray(lastMsg.parts) &&
+      lastMsg.parts.some(
+        (p: any) =>
+          (p.type === "text" && typeof p.text === "string" && p.text.trim().length > 0) ||
+          p.type === "tool-invocation"
+      )) ||
+      (typeof lastMsg?.content === "string" && lastMsg.content.trim().length > 0));
+
+  const isLoading =
+    status === "submitted" || (status === "streaming" && !assistantHasContent);
 
   return (
     <div className="h-full flex flex-col bg-background rounded-2xl my-2 mx-1 p-2">
