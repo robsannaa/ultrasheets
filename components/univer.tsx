@@ -158,36 +158,17 @@ export function Univer() {
           }
         } catch {}
 
-        // Re-bind tool executor and exit early
+        // Reuse existing API and single dispatcher
         const univerAPI = window.__ultraUniverAPI;
         (window as any).univerAPI = univerAPI;
-        window.executeUniverTool = async (toolName: string, params?: any) => {
-          try {
-            switch (toolName) {
-              case "list_columns":
-                return await executeListColumns();
-              case "calculate_total":
-                return await executeCalculateTotal(params);
-              case "create_pivot_table":
-                return await executeCreatePivotTable(params);
-              case "generate_chart":
-                return await executeGenerateChart(params);
-              case "format_currency":
-                return await executeFormatCurrency(params);
-              case "switch_sheet":
-                return await executeSwitchSheet(params);
-              case "add_filter":
-                return await executeAddFilter(params);
-              case "conditional_formatting":
-                return await executeConditionalFormatting(params);
-              default:
-                throw new Error(`Unknown tool: ${toolName}`);
-            }
-          } catch (error) {
-            console.error(`Tool execution failed: ${toolName}`, error);
-            throw error;
-          }
-        };
+        if (typeof window.executeUniverTool !== "function") {
+          window.executeUniverTool = async (toolName: string, params?: any) => {
+            const fns = (window as any).__ultraToolFns || {};
+            const fn = fns[`execute_${toolName}`] || fns[toolName];
+            if (!fn) throw new Error(`Unknown tool: ${toolName}`);
+            return await fn(params);
+          };
+        }
         console.log(
           "🎯 Univer component: Reusing existing univerAPI (guarded re-init)"
         );
@@ -251,33 +232,25 @@ export function Univer() {
         (window as any).univerAPI = undefined;
       };
 
-      // Set up global tool execution handler
-      window.executeUniverTool = async (toolName: string, params?: any) => {
-        try {
-          switch (toolName) {
-            case "list_columns":
-              return await executeListColumns();
-            case "calculate_total":
-              return await executeCalculateTotal(params);
-            case "create_pivot_table":
-              return await executeCreatePivotTable(params);
-            case "generate_chart":
-              return await executeGenerateChart(params);
-            case "format_currency":
-              return await executeFormatCurrency(params);
-            case "switch_sheet":
-              return await executeSwitchSheet(params);
-            case "add_filter":
-              return await executeAddFilter(params);
-            case "conditional_formatting":
-              return await executeConditionalFormatting(params);
-            default:
-              throw new Error(`Unknown tool: ${toolName}`);
-          }
-        } catch (error) {
-          console.error(`Tool execution failed: ${toolName}`, error);
-          throw error;
-        }
+      // Defer attaching dispatcher until after tool functions are declared below
+      (window as any).__attachUltraDispatcher = () => {
+        const __toolFns: Record<string, any> = {
+          execute_list_columns: executeListColumns,
+          execute_calculate_total: executeCalculateTotal,
+          execute_create_pivot_table: executeCreatePivotTable,
+          execute_generate_chart: executeGenerateChart,
+          execute_format_currency: executeFormatCurrency,
+          execute_switch_sheet: executeSwitchSheet,
+          execute_add_filter: executeAddFilter,
+          execute_conditional_formatting: executeConditionalFormatting,
+        };
+        (window as any).__ultraToolFns = __toolFns;
+        window.executeUniverTool = async (toolName: string, params?: any) => {
+          const fns = (window as any).__ultraToolFns || {};
+          const fn = fns[`execute_${toolName}`] || fns[toolName];
+          if (!fn) throw new Error(`Unknown tool: ${toolName}`);
+          return await fn(params);
+        };
       };
 
       // Tool execution functions
@@ -825,17 +798,25 @@ export function Univer() {
             throw new Error("No active workbook available");
           }
           let worksheet: any = workbook.getActiveSheet();
-          // Create/switch sheet if requested
+          // Create/switch sheet if requested (per docs API)
           try {
-            if (
-              sheetName &&
-              typeof (workbook as any).getSheetByName === "function"
-            ) {
-              const existing = (workbook as any).getSheetByName(sheetName);
-              if (existing) {
-                worksheet = existing;
-              } else if (typeof (workbook as any).insertSheet === "function") {
-                worksheet = (workbook as any).insertSheet(sheetName);
+            if (sheetName && typeof (workbook as any).create === "function") {
+              // If not exists → create(name, rows, cols); then set active
+              const exists = (workbook as any)
+                .getSheets?.()
+                ?.find((s: any) => s.getName?.() === sheetName);
+              if (!exists) {
+                (workbook as any).create(sheetName, 100, 26);
+              }
+              const all = (workbook as any).getSheets?.() || [];
+              const target = all.find((s: any) => s.getName?.() === sheetName);
+              if (target) {
+                if (typeof (workbook as any).setActiveSheet === "function") {
+                  (workbook as any).setActiveSheet(target);
+                } else if (typeof target.activate === "function") {
+                  target.activate();
+                }
+                worksheet = target;
               }
             }
           } catch (e) {
