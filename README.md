@@ -1,7 +1,7 @@
 # UltraSheets
 
 <video width="100%" controls>
-  <source src="./public/video.mp4" type="video/mp4">
+  <source src="https://drive.google.com/file/d/16uO7e7AuWmeSh9OQ8DlWah7CaIVQvv1N/view?usp=sharing" type="video/mp4">
   Your browser does not support the video tag.
 </video>
 
