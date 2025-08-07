@@ -441,37 +441,40 @@ export function ChatSidebar() {
     },
   });
 
+  // Keep track of executed tool invocations to avoid duplicate runs during streaming updates
+  const executedToolCallIdsRef = React.useRef<Set<string>>(new Set());
+
   // Listen for tool results and execute them on the frontend
   useEffect(() => {
     const executeClientSideActions = async () => {
       const lastMessage = messages[messages.length - 1];
-      if (lastMessage?.role === "assistant" && lastMessage.parts) {
-        for (const part of lastMessage.parts) {
-          if (
-            part.type === "tool-invocation" &&
-            part.toolInvocation.state === "result"
-          ) {
-            const result = part.toolInvocation.result;
+      if (lastMessage?.role !== "assistant" || !lastMessage.parts) return;
 
-            if (result && result.clientSideAction) {
-              const action = result.clientSideAction;
+      for (const part of lastMessage.parts) {
+        if (
+          part.type === "tool-invocation" &&
+          part.toolInvocation.state === "result"
+        ) {
+          const callId: string | undefined = part.toolInvocation.toolCallId;
+          // Deduplicate by toolCallId to prevent re-execution flicker
+          if (callId && executedToolCallIdsRef.current.has(callId)) continue;
 
-              try {
-                if (
-                  action.type === "executeUniverTool" &&
-                  window.executeUniverTool
-                ) {
-                  await window.executeUniverTool(
-                    action.toolName,
-                    action.params
-                  );
-                } else if (action.type === "formatCells") {
-                  await formatCells(action);
-                }
-              } catch (error) {
-                console.error("Failed to execute client-side action:", error);
-              }
+          const result = part.toolInvocation.result;
+          if (!result || !result.clientSideAction) continue;
+
+          const action = result.clientSideAction;
+          try {
+            if (action.type === "executeUniverTool" && window.executeUniverTool) {
+              await window.executeUniverTool(action.toolName, action.params);
+            } else if (action.type === "formatCells") {
+              await formatCells(action);
             }
+
+            // Mark as executed only after successful run
+            if (callId) executedToolCallIdsRef.current.add(callId);
+          } catch (error) {
+            console.error("Failed to execute client-side action:", error);
+            // Do not mark executed on failure to allow retry on next render
           }
         }
       }
