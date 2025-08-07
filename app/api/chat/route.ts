@@ -36,31 +36,57 @@ export async function POST(req: Request) {
 
     console.log("Processing chat request with", messages.length, "messages");
 
-    // Build sheet context from workbook data sent from frontend
+    // Build sheet context from workbook data sent from frontend (multi-sheet, multi-table, recent actions)
     let sheetContextMessage = "";
-    if (workbookData && workbookData.sheets && workbookData.sheets.length > 0) {
+    if (workbookData && Array.isArray(workbookData.sheets) && workbookData.sheets.length > 0) {
       const activeSheet = workbookData.sheets.find((s: any) => s.isActive) || workbookData.sheets[0];
-      
-      if (activeSheet && activeSheet.headers && activeSheet.headers.length > 0) {
-        sheetContextMessage = `
 
-CURRENT SHEET CONTEXT:
-- Spreadsheet: "${activeSheet.name}"
-- Columns: ${activeSheet.headers.join(", ")} (${activeSheet.headers.length} total)
-- Data Range: A1:${String.fromCharCode(65 + activeSheet.headers.length - 1)}${activeSheet.structure?.dataRows || 50}
-- Summary: ${activeSheet.structure?.totalCells || 0} cells with data
-
-Based on the available data, you can help users with:
-- Column analysis: The spreadsheet has ${activeSheet.headers.length} columns: ${activeSheet.headers.join(", ")}
-- Calculations: Available columns for operations
-- Data insights: Structured data ready for analysis`;
-
-        console.log("✅ Generated sheet context from workbook data:", {
-          sheetName: activeSheet.name,
-          headers: activeSheet.headers,
-          totalCells: activeSheet.structure?.totalCells,
+      const summarizeTables = (tables: any[]) => {
+        if (!Array.isArray(tables) || tables.length === 0) return "no tables detected";
+        const parts = tables.slice(0, 3).map((t: any, i: number) => {
+          const cols = Array.isArray(t.headers) ? t.headers.join(", ") : "";
+          const numerics = Array.isArray(t.numericColumns) ? ` | numeric: ${t.numericColumns.join(",")}` : "";
+          return `T${i + 1} ${t.range} (${t.recordCount} rows) [${cols}]${numerics}`;
         });
-      }
+        const more = tables.length > 3 ? ` (+${tables.length - 3} more)` : "";
+        return parts.join("; ") + more;
+      };
+
+      const multiSheetSummary = workbookData.sheets
+        .slice(0, 5)
+        .map((s: any) => `- ${s.isActive ? "*" : ""}${s.name}: ${s.structure?.totalCells || 0} cells; tables: ${summarizeTables(s.tables)}`)
+        .join("\n");
+
+      const recentActions = Array.isArray(workbookData.recentActions)
+        ? workbookData.recentActions
+            .slice(-10)
+            .map((a: any) => `• ${a.at}: ${a.tool}(${JSON.stringify(a.params)}) => ${a.result || "ok"}`)
+            .join("\n")
+        : "none";
+
+      const inferredDataRange = activeSheet && Array.isArray(activeSheet.headers) && activeSheet.headers.length > 0
+        ? `A1:${String.fromCharCode(65 + activeSheet.headers.length - 1)}${activeSheet.structure?.dataRows || 50}`
+        : "A1:A1";
+
+      sheetContextMessage = `
+
+WORKBOOK CONTEXT (client-provided):
+${multiSheetSummary}
+
+ACTIVE SHEET DETAILS:
+- Name: "${activeSheet?.name || "Sheet"}"
+- Primary Columns: ${(activeSheet?.headers || []).join(", ")}
+- Inferred Data Range: ${inferredDataRange}
+
+RECENT ACTIONS:
+${recentActions}
+
+Guidance:
+- Prefer using detected tables (headers + ranges) for operations.
+- When multiple tables exist, pick the one matching the user's intent; otherwise ask to disambiguate.
+- Use calculate_total/create_pivot_table/generate_chart referencing the correct table range if available.`;
+
+      console.log("✅ Generated multi-sheet context from workbook data.");
     } else {
       console.log("⚠️ No workbook data received from frontend");
     }

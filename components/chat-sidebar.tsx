@@ -350,73 +350,127 @@ function ChatInput({
   );
 }
 
-// Simple function to extract basic workbook data from Univer
+// Rich workbook context with multi-table detection and recent action log
 function extractWorkbookData() {
   try {
-    if (typeof window !== "undefined" && (window as any).univerAPI) {
-      const univerAPI = (window as any).univerAPI;
-      const workbook = univerAPI.getActiveWorkbook();
+    if (typeof window === "undefined" || !(window as any).univerAPI) return null;
+    const w: any = window as any;
+    const univerAPI = w.univerAPI;
+    const workbook = univerAPI.getActiveWorkbook();
+    if (!workbook || typeof workbook.save !== "function") return null;
 
-      if (!workbook) {
-        return null;
+    const activeSheet = workbook.getActiveSheet();
+    const activeSnapshot = activeSheet?.getSheet()?.getSnapshot();
+    const activeName = activeSnapshot?.name;
+
+    const wbData = workbook.save();
+    const sheetOrder: string[] = wbData.sheetOrder || [];
+    const sheetsData: Record<string, any> = wbData.sheets || {};
+
+    const detectTables = (cellData: any) => {
+      const tables: Array<{ range: string; headers: string[]; recordCount: number; numericColumns: string[] }> = [];
+      if (!cellData) return tables;
+
+      const rows = Object.keys(cellData).map((k) => parseInt(k, 10)).sort((a, b) => a - b);
+      const maxRow = rows.length ? rows[rows.length - 1] : 0;
+      let maxCol = 0;
+      for (const r of rows) {
+        const cols = Object.keys(cellData[r] || {}).map((k) => parseInt(k, 10));
+        if (cols.length) maxCol = Math.max(maxCol, cols[cols.length - 1]);
       }
 
-      const activeSheet = workbook.getActiveSheet();
-      const sheetSnapshot = activeSheet.getSheet().getSnapshot();
-      const cellData = sheetSnapshot.cellData || {};
+      const headerCandidates: number[] = [];
+      for (let r = 0; r <= Math.min(maxRow, 20); r++) {
+        const rowData = cellData[r] || {};
+        let textRun = 0;
+        for (let c = 0; c <= Math.min(maxCol, 30); c++) {
+          const cell = rowData[c];
+          if (cell && typeof cell.v === "string" && cell.v.trim() && !cell.f) textRun++;
+          else if (textRun > 0) break;
+        }
+        if (textRun >= 2) headerCandidates.push(r);
+      }
 
-      // Find headers in first few rows
-      let headers: string[] = [];
-      for (let row = 0; row < 5; row++) {
-        const rowData = cellData[row] || {};
-        const rowHeaders: string[] = [];
+      for (const headerRow of headerCandidates) {
+        const rowData = cellData[headerRow] || {};
+        const headers: string[] = [];
+        let lastCol = -1;
+        for (let c = 0; c <= Math.min(maxCol, 50); c++) {
+          const cell = rowData[c];
+          if (cell && typeof cell.v === "string" && cell.v.trim() && !cell.f) {
+            headers.push(String(cell.v).trim());
+            lastCol = c;
+          } else if (headers.length > 0) break;
+        }
+        if (headers.length < 2) continue;
 
-        for (let col = 0; col < 20; col++) {
-          const cell = rowData[col];
-          if (cell && typeof cell.v === "string" && cell.v.trim()) {
-            rowHeaders.push(cell.v.trim());
-          } else {
-            break;
+        let recordCount = 0;
+        for (let r = headerRow + 1; r <= Math.min(headerRow + 500, maxRow); r++) {
+          const rd = cellData[r] || {};
+          let hasData = false;
+          for (let c = 0; c <= lastCol; c++) {
+            const cell = rd[c];
+            if (cell && cell.v !== undefined && cell.v !== null && cell.v !== "") {
+              hasData = true;
+              break;
+            }
           }
+          if (hasData) recordCount++;
+          else if (recordCount > 0) break;
         }
 
-        if (rowHeaders.length > headers.length) {
-          headers = rowHeaders;
+        const endColLetter = String.fromCharCode(65 + Math.max(0, lastCol));
+        const range = `A${headerRow + 1}:${endColLetter}${headerRow + 1 + recordCount}`;
+
+        const numericColumns: string[] = [];
+        for (let c = 0; c <= lastCol; c++) {
+          let numericHits = 0;
+          for (let r = headerRow + 1; r <= headerRow + 1 + Math.min(5, recordCount); r++) {
+            const cell = (cellData[r] || {})[c];
+            if (!cell) continue;
+            const v = cell.v;
+            if (typeof v === "number" || (typeof v === "string" && /^[£$€¥]?\s*[\d,.]+$/.test(v))) numericHits++;
+          }
+          if (numericHits >= 2) numericColumns.push(String.fromCharCode(65 + c));
         }
+
+        tables.push({ range, headers, recordCount, numericColumns });
       }
 
-      // Count total cells with data
+      return tables;
+    };
+
+    const sheets = sheetOrder.map((sid) => {
+      const s = sheetsData[sid];
+      const name = s?.name || "Sheet";
+      const cellData = s?.cellData || {};
+
       let totalCells = 0;
-      for (const rowIndex in cellData) {
-        for (const colIndex in cellData[rowIndex]) {
-          const cell = cellData[rowIndex][colIndex];
-          if (
-            cell &&
-            cell.v !== undefined &&
-            cell.v !== null &&
-            cell.v !== ""
-          ) {
-            totalCells++;
-          }
+      for (const r in cellData) {
+        for (const c in cellData[r]) {
+          const cell = cellData[r][c];
+          if (cell && cell.v !== undefined && cell.v !== null && cell.v !== "") totalCells++;
         }
       }
+
+      const tables = detectTables(cellData);
+      const primaryHeaders = tables[0]?.headers || [];
+      const dataRows = tables[0]?.recordCount || 0;
 
       return {
-        sheets: [
-          {
-            name: sheetSnapshot.name || "Sheet1",
-            isActive: true,
-            headers,
-            structure: {
-              totalCells,
-              dataRows: Object.keys(cellData).length,
-            },
-          },
-        ],
+        name,
+        isActive: name === activeName,
+        headers: primaryHeaders,
+        structure: { totalCells, dataRows },
+        tables,
       };
-    }
+    });
 
-    return null;
+    const recentActions = Array.isArray(w.ultraActionLog)
+      ? (w.ultraActionLog as any[]).slice(-10)
+      : [];
+
+    return { sheets, recentActions };
   } catch (error) {
     console.error("Error extracting workbook data:", error);
     return null;
@@ -464,10 +518,42 @@ export function ChatSidebar() {
 
           const action = result.clientSideAction;
           try {
-            if (action.type === "executeUniverTool" && window.executeUniverTool) {
-              await window.executeUniverTool(action.toolName, action.params);
+            if (
+              action.type === "executeUniverTool" &&
+              window.executeUniverTool
+            ) {
+              const execResult = await window.executeUniverTool(
+                action.toolName,
+                action.params
+              );
+              // Record recent action for richer LLM context
+              try {
+                const w: any = window as any;
+                w.ultraActionLog = w.ultraActionLog || [];
+                w.ultraActionLog.push({
+                  at: new Date().toISOString(),
+                  tool: action.toolName,
+                  params: action.params,
+                  result:
+                    execResult && typeof execResult === "object" && execResult.message
+                      ? execResult.message
+                      : "ok",
+                });
+                if (w.ultraActionLog.length > 50) w.ultraActionLog.shift();
+              } catch {}
             } else if (action.type === "formatCells") {
               await formatCells(action);
+              try {
+                const w: any = window as any;
+                w.ultraActionLog = w.ultraActionLog || [];
+                w.ultraActionLog.push({
+                  at: new Date().toISOString(),
+                  tool: "format_cells",
+                  params: action,
+                  result: "ok",
+                });
+                if (w.ultraActionLog.length > 50) w.ultraActionLog.shift();
+              } catch {}
             }
 
             // Mark as executed only after successful run
