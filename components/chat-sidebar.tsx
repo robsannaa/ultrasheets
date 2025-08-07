@@ -50,9 +50,9 @@ function ChatMessages({
             </Avatar>
             <div
               className={cn(
-                "max-w-[70%] rounded-lg p-3 text-sm whitespace-pre-wrap",
+                "max-w-[70%] rounded-lg p-3 text-sm",
                 message.role === "user"
-                  ? "bg-primary text-primary-foreground"
+                  ? "bg-primary text-primary-foreground whitespace-pre-wrap"
                   : "bg-muted"
               )}
             >
@@ -74,6 +74,12 @@ function ChatMessages({
                               ),
                               th: (props) => <></>,
                               td: (props) => <></>,
+                              p: (props) => <p className="mb-1 leading-5" {...props} />,
+                              h1: (props) => <h1 className="mb-1 text-base" {...props} />,
+                              h2: (props) => <h2 className="mb-1 text-sm" {...props} />,
+                              h3: (props) => <h3 className="mb-1 text-sm" {...props} />,
+                              ul: (props) => <ul className="list-disc ml-4 mb-1" {...props} />,
+                              ol: (props) => <ol className="list-decimal ml-4 mb-1" {...props} />,
                               code: ({ inline, children, ...props }: any) => (
                                 <code
                                   className={cn(
