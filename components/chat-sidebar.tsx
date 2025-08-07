@@ -73,6 +73,9 @@ function ChatMessages({
     return result;
   }, [messages]);
 
+  // Track assistant texts we've already rendered during this pass to avoid duplicates
+  const seenAssistantTexts = React.useRef<Set<string>>(new Set());
+
   return (
     <ScrollArea className="h-full px-1 py-4" ref={scrollAreaRef}>
       <div className="space-y-4">
@@ -108,7 +111,16 @@ function ChatMessages({
                         )
                         .map((p: any) => p.text)
                         .join("");
-                      return text ? (
+                      // Deduplicate identical assistant texts within the same render pass
+                      const normalized = (text || "").replace(/\s+/g, " ").trim();
+                      const shouldHideText =
+                        message.role === "assistant" &&
+                        normalized.length > 0 &&
+                        seenAssistantTexts.current.has(normalized);
+                      if (message.role === "assistant" && normalized.length > 0 && !shouldHideText) {
+                        seenAssistantTexts.current.add(normalized);
+                      }
+                      return text && !shouldHideText ? (
                         <CollapsibleMarkdown key="assistant-text" text={text} />
                       ) : null;
                     } catch {
