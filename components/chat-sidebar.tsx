@@ -157,16 +157,7 @@ function ChatMessages({
             </div>
           </div>
         ))}
-        {isLoading && (
-          <div className="flex items-start gap-3">
-            <Avatar className="w-8 h-8">
-              <AvatarFallback>A</AvatarFallback>
-            </Avatar>
-            <div className="bg-muted rounded-lg p-3 text-sm">
-              <Loader2 className="w-4 h-4 animate-spin" />
-            </div>
-          </div>
-        )}
+        {/* Typing indicator removed: the send button already shows progress */}
       </div>
     </ScrollArea>
   );
@@ -908,10 +899,13 @@ export function ChatSidebar() {
     ((Array.isArray(lastMsg.parts) &&
       lastMsg.parts.some(
         (p: any) =>
-          (p.type === "text" && typeof p.text === "string" && p.text.trim().length > 0) ||
+          (p.type === "text" &&
+            typeof p.text === "string" &&
+            p.text.trim().length > 0) ||
           p.type === "tool-invocation"
       )) ||
-      (typeof lastMsg?.content === "string" && lastMsg.content.trim().length > 0));
+      (typeof lastMsg?.content === "string" &&
+        lastMsg.content.trim().length > 0));
 
   const isLoading =
     status === "submitted" || (status === "streaming" && !assistantHasContent);
