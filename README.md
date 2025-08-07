@@ -1,9 +1,8 @@
 # UltraSheets
 
-<video width="100%" controls>
-  <source src="https://drive.google.com/file/d/16uO7e7AuWmeSh9OQ8DlWah7CaIVQvv1N/view?usp=sharing" type="video/mp4">
-  Your browser does not support the video tag.
-</video>
+## 🎥 Demo
+
+Watch the UltraSheets demo: [https://drive.google.com/file/d/16uO7e7AuWmeSh9OQ8DlWah7CaIVQvv1N/view?usp=sharing](https://drive.google.com/file/d/16uO7e7AuWmeSh9OQ8DlWah7CaIVQvv1N/view?usp=sharing)
 
 An AI-powered spreadsheet application built with Next.js, Univer, and OpenAI. This application provides intelligent spreadsheet analysis, data manipulation, and visualization capabilities through natural language interactions.
 
