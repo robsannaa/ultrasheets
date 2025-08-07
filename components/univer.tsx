@@ -265,7 +265,7 @@ export function Univer() {
           execute_conditional_formatting: executeConditionalFormatting,
           execute_auto_fit_columns: executeAutoFitColumns,
           execute_find_cell: executeFindCell,
-        execute_format_as_table: executeFormatAsTable,
+          execute_format_as_table: executeFormatAsTable,
         };
         (window as any).__ultraToolFns = __toolFns;
         window.executeUniverTool = async (toolName: string, params?: any) => {
@@ -589,12 +589,9 @@ export function Univer() {
         const id = tableId || `tbl_${Date.now().toString(36)}`;
         const tName = name || id;
 
-        const ok = await fWorksheet.addTable(
-          tName,
-          fRange.getRange(),
-          id,
-          { showHeader }
-        );
+        const ok = await fWorksheet.addTable(tName, fRange.getRange(), id, {
+          showHeader,
+        });
         if (!ok) return { success: false, message: "Failed to add table" };
 
         if (theme && typeof fWorksheet.addTableTheme === "function") {
@@ -603,7 +600,12 @@ export function Univer() {
           } catch {}
         }
 
-        return { success: true, message: `Table ${tName} created`, id, name: tName };
+        return {
+          success: true,
+          message: `Table ${tName} created`,
+          id,
+          name: tName,
+        };
       };
       const executeListColumns = async () => {
         if (!univerAPI) {
@@ -2132,6 +2134,13 @@ export function Univer() {
           )}`;
         }
       };
+
+      // Attach dispatcher now that all tool functions are declared
+      try {
+        (window as any).__attachUltraDispatcher?.();
+      } catch (e) {
+        console.warn("⚠️ Failed to attach tool dispatcher:", e);
+      }
 
       console.log("🎯 Univer component: Initialization complete");
     };
