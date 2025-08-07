@@ -1,11 +1,13 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-
+import { useTheme } from "next-themes";
 import "@univerjs/preset-sheets-core/lib/index.css";
+import "@univerjs/preset-sheets-drawing/lib/index.css";
+import "@univerjs/preset-sheets-advanced/lib/index.css";
 // Enable formula facade API (VLOOKUP/INDEX/MATCH and 500+ functions)
 import "@univerjs/sheets-formula/facade";
-
+import { greenTheme } from "@univerjs/themes";
 // Global tool execution handler
 declare global {
   interface Window {
@@ -20,17 +22,29 @@ declare global {
 
 export function Univer() {
   const containerRef = useRef<HTMLDivElement>(null!);
-
+  const { theme } = useTheme();
   useEffect(() => {
     // Dynamic imports to avoid SSR issues
     const initializeUniver = async () => {
       const { UniverSheetsCorePreset } = await import(
         "@univerjs/preset-sheets-core"
       );
+      const { UniverSheetsDrawingPreset } = await import(
+        "@univerjs/preset-sheets-drawing"
+      );
+      const { UniverSheetsAdvancedPreset } = await import(
+        "@univerjs/preset-sheets-advanced"
+      );
       // Use CalculationMode from sheets-formula to align with facade API
       const { CalculationMode } = await import("@univerjs/sheets-formula");
       const sheetsCoreEnUS = await import(
         "@univerjs/preset-sheets-core/locales/en-US"
+      ).then((m) => m.default);
+      const sheetsDrawingEnUS = await import(
+        "@univerjs/preset-sheets-drawing/locales/en-US"
+      ).then((m) => m.default);
+      const sheetsAdvancedEnUS = await import(
+        "@univerjs/preset-sheets-advanced/locales/en-US"
       ).then((m) => m.default);
       const { createUniver, LocaleType, mergeLocales } = await import(
         "@univerjs/presets"
@@ -69,6 +83,10 @@ export function Univer() {
             initialFormulaComputing: CalculationMode.FORCED,
           },
         }),
+        // Required for charts
+        UniverSheetsDrawingPreset(),
+        // Includes charts and other advanced features
+        UniverSheetsAdvancedPreset(),
       ];
 
       // Add filter preset if available
@@ -77,8 +95,8 @@ export function Univer() {
       }
 
       const locales = filterLocales
-        ? mergeLocales(sheetsCoreEnUS, filterLocales)
-        : mergeLocales(sheetsCoreEnUS);
+        ? mergeLocales(sheetsCoreEnUS, sheetsDrawingEnUS, sheetsAdvancedEnUS, filterLocales)
+        : mergeLocales(sheetsCoreEnUS, sheetsDrawingEnUS, sheetsAdvancedEnUS);
 
       // If already initialized (HMR / re-render), reuse existing API
       if (
@@ -126,6 +144,7 @@ export function Univer() {
           [LocaleType.EN_US]: locales,
         },
         presets,
+        darkMode: theme === "dark",
       });
 
       // Force initial formula computing at lifecycle Starting for future workbooks
@@ -354,7 +373,8 @@ export function Univer() {
         return { startRow, startCol, endRow, endCol };
       };
 
-      const colLetterToOffset = (letter: string) => letter.toUpperCase().charCodeAt(0) - 65; // A=0
+      const colLetterToOffset = (letter: string) =>
+        letter.toUpperCase().charCodeAt(0) - 65; // A=0
 
       const executeCalculateTotal = async (params: any) => {
         console.log("🔍 calculate_total: Starting execution...", params);
@@ -402,9 +422,11 @@ export function Univer() {
           let scopedStartCol = 0;
           let scopedEndCol = (sheetSnapshot.columnCount || 26) - 1;
 
-          const scopedRange = data_range || (tableId && String(tableId).split(":")[1]);
+          const scopedRange =
+            data_range || (tableId && String(tableId).split(":")[1]);
           if (scopedRange && /^[A-Z]+\d+:[A-Z]+\d+$/i.test(scopedRange)) {
-            const { startRow, endRow, startCol, endCol } = parseA1Range(scopedRange);
+            const { startRow, endRow, startCol, endCol } =
+              parseA1Range(scopedRange);
             scopedStartRow = startRow;
             scopedEndRow = endRow;
             scopedStartCol = startCol;
@@ -416,7 +438,11 @@ export function Univer() {
           let headerRow = -1;
 
           // Find the row with the most consecutive text values (likely headers)
-          for (let row = scopedStartRow; row <= Math.min(scopedStartRow + 4, scopedEndRow); row++) {
+          for (
+            let row = scopedStartRow;
+            row <= Math.min(scopedStartRow + 4, scopedEndRow);
+            row++
+          ) {
             const rowData = cellData[row] || {};
             const tempColumns: string[] = [];
 
@@ -455,7 +481,9 @@ export function Univer() {
             columnIndex = scopedStartCol + offset;
           } else {
             // Column name provided (e.g., 'Search_Volume')
-            const relIdx = headers.findIndex((h) => h.toLowerCase().includes(column.toLowerCase()));
+            const relIdx = headers.findIndex((h) =>
+              h.toLowerCase().includes(column.toLowerCase())
+            );
             if (relIdx >= 0) columnIndex = scopedStartCol + relIdx;
           }
 
@@ -479,11 +507,7 @@ export function Univer() {
 
           // Process all rows (starting after header row)
           const dataStartRow = headerRow + 1;
-          for (
-            let row = dataStartRow;
-            row <= scopedEndRow;
-            row++
-          ) {
+          for (let row = dataStartRow; row <= scopedEndRow; row++) {
             const rowData = cellData[row];
             if (rowData) {
               const cell = rowData[columnIndex];
@@ -605,7 +629,14 @@ export function Univer() {
           throw new Error("Univer API not available");
         }
 
-        const { groupBy, valueColumn, aggFunc, destination, data_range, tableId } = params;
+        const {
+          groupBy,
+          valueColumn,
+          aggFunc,
+          destination,
+          data_range,
+          tableId,
+        } = params;
 
         try {
           const workbook = univerAPI.getActiveWorkbook();
@@ -625,7 +656,8 @@ export function Univer() {
           // Scope to range if provided
           const parseA1Range = (a1: string) => {
             const [start, end] = a1.split(":");
-            const colToIndex = (s: string) => s.toUpperCase().charCodeAt(0) - 65; // A=0
+            const colToIndex = (s: string) =>
+              s.toUpperCase().charCodeAt(0) - 65; // A=0
             const startCol = colToIndex(start.replace(/\d+/g, ""));
             const startRow = parseInt(start.replace(/\D+/g, ""), 10) - 1; // 0-based
             const endCol = colToIndex(end.replace(/\d+/g, ""));
@@ -636,9 +668,11 @@ export function Univer() {
           let scopedEndRow = sheetSnapshot.rowCount || 1000;
           let scopedStartCol = 0;
           let scopedEndCol = (sheetSnapshot.columnCount || 26) - 1;
-          const scopedRange = data_range || (tableId && String(tableId).split(":")[1]);
+          const scopedRange =
+            data_range || (tableId && String(tableId).split(":")[1]);
           if (scopedRange && /^[A-Z]+\d+:[A-Z]+\d+$/i.test(scopedRange)) {
-            const { startRow, endRow, startCol, endCol } = parseA1Range(scopedRange);
+            const { startRow, endRow, startCol, endCol } =
+              parseA1Range(scopedRange);
             scopedStartRow = startRow;
             scopedEndRow = endRow;
             scopedStartCol = startCol;
@@ -649,7 +683,11 @@ export function Univer() {
           const headers: string[] = [];
           let headerRow = -1;
 
-          for (let row = scopedStartRow; row <= Math.min(scopedStartRow + 4, scopedEndRow); row++) {
+          for (
+            let row = scopedStartRow;
+            row <= Math.min(scopedStartRow + 4, scopedEndRow);
+            row++
+          ) {
             const rowData = cellData[row] || {};
             const tempColumns: string[] = [];
 
@@ -821,14 +859,15 @@ export function Univer() {
           }
           const worksheet = workbook.getActiveSheet();
 
-        // Get worksheet snapshot
+          // Get worksheet snapshot
           const sheetSnapshot = worksheet.getSheet().getSnapshot();
           if (!sheetSnapshot || !sheetSnapshot.cellData) {
             throw new Error("No data found in spreadsheet");
           }
 
-        // Auto-detect data range if not provided; honor tableId if present
-        let finalDataRange = data_range || (tableId && String(tableId).split(":")[1]);
+          // Auto-detect data range if not provided; honor tableId if present
+          let finalDataRange =
+            data_range || (tableId && String(tableId).split(":")[1]);
           if (!finalDataRange) {
             // Find headers first
             const cellData = sheetSnapshot.cellData;
@@ -920,14 +959,51 @@ export function Univer() {
             `📊 executeGenerateChart: Creating ${univerChartType} chart with range ${finalDataRange}`
           );
 
-          // Create improved chart with better data detection
-          await createImprovedChart(
-            worksheet,
-            finalDataRange,
-            chart_type,
-            title,
-            chartPosition
-          );
+          // Insert native Univer chart via facade API
+          try {
+            const fWorkbook: any = univerAPI.getActiveWorkbook();
+            if (!fWorkbook) throw new Error("No active workbook available");
+            const fWorksheet: any = fWorkbook.getActiveSheet();
+            const enumType = (univerAPI as any).Enum?.ChartType || {};
+            const enumMap: Record<string, any> = {
+              column: enumType.Column,
+              line: enumType.Line,
+              pie: enumType.Pie,
+              bar: enumType.Bar,
+              scatter: enumType.Scatter,
+            };
+            const chartTypeEnum = enumMap[chart_type] ?? enumType.Column;
+
+            // Convert position like "H2" to row/col anchors (0-based)
+            const posCol = (chartPosition.match(/[A-Z]+/i)?.[0] || "H").toUpperCase();
+            const posRowNum = parseInt(chartPosition.replace(/\D+/g, ""), 10) || 2;
+            const anchorRow = posRowNum - 1;
+            const anchorCol = posCol.charCodeAt(0) - 65;
+
+            const builder = fWorksheet
+              .newChart()
+              .setChartType(chartTypeEnum)
+              .addRange(finalDataRange)
+              .setPosition(anchorRow, anchorCol, 0, 0)
+              .setWidth(width)
+              .setHeight(height);
+
+            if (title) {
+              builder.setOptions("title.text", title);
+            }
+
+            const chartInfo = builder.build();
+            await fWorksheet.insertChart(chartInfo);
+          } catch (chartError) {
+            console.warn("⚠️ Native chart insertion failed, falling back.", chartError);
+            await createImprovedChart(
+              worksheet,
+              finalDataRange,
+              chart_type,
+              title,
+              chartPosition
+            );
+          }
 
           console.log(
             `✅ executeGenerateChart: Chart created at ${chartPosition}`
