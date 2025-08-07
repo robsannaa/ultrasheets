@@ -200,22 +200,3 @@ For issues and questions:
 2. Review browser console for error messages
 3. Ensure all dependencies are properly installed
 4. Verify OpenAI API key is correctly configured
-
-## 🔧 Development Notes
-
-### Key Files Modified During Debug Session:
-
-- `/components/chat-sidebar.tsx` - Fixed `extractWorkbookData()` timing issue
-- `/app/api/chat/route.ts` - Added missing helper functions for tools
-
-### Component Load Order:
-
-1. `page.tsx` renders both `Univer` and `ChatSidebar` simultaneously
-2. `Univer` component sets `window.univerAPI` after initialization
-3. `ChatSidebar` uses fallback pattern to handle timing differences
-
-### Service Architecture:
-
-- `UniverService` acts as singleton wrapper around Univer API
-- Global `window.univerAPI` provides direct access for performance
-- Dual-path extraction ensures reliability across load conditions
