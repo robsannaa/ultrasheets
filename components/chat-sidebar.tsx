@@ -65,19 +65,15 @@ function ChatMessages({
                           key={index}
                           className="leading-6 prose prose-sm max-w-none dark:prose-invert"
                         >
-                           <ReactMarkdown
+                          <ReactMarkdown
                             remarkPlugins={[remarkGfm]}
                             components={{
                               table: (props) => (
-                                 // Collapse large markdown tables from assistant for brevity
-                                 <></>
+                                // Collapse large markdown tables from assistant for brevity
+                                <></>
                               ),
-                              th: (props) => (
-                                 <></>
-                              ),
-                              td: (props) => (
-                                 <></>
-                              ),
+                              th: (props) => <></>,
+                              td: (props) => <></>,
                               code: ({ inline, children, ...props }: any) => (
                                 <code
                                   className={cn(
@@ -114,7 +110,12 @@ function ChatMessages({
                       if (state === "call") {
                         if (toolName === "get_sheet_context") return null;
                         return (
-                          <ToolBadge key={callId} label={label} state="call" />
+                          <ToolBadge
+                            key={callId}
+                            label={label}
+                            toolName={toolName}
+                            state="call"
+                          />
                         );
                       } else if (state === "result") {
                         // Only show result for important operations, hide technical details
@@ -139,6 +140,7 @@ function ChatMessages({
                           <ToolBadge
                             key={callId}
                             label={label}
+                            toolName={toolName}
                             state="result"
                           />
                         );
@@ -945,28 +947,35 @@ export function ChatSidebar() {
 
 function ToolBadge({
   label,
+  toolName,
   state,
 }: {
   label: string;
+  toolName?: string;
   state: "call" | "result" | "error";
 }) {
   const isRunning = state === "call";
   return (
-    <div
-      className={cn(
-        "inline-flex items-center gap-2 text-xs rounded-md px-2 py-1 border",
-        isRunning
-          ? "border-blue-300 bg-blue-50 text-blue-700"
-          : "border-green-300 bg-green-50 text-green-700"
-      )}
-    >
-      {isRunning ? (
-        <Loader2 className="h-3.5 w-3.5 animate-spin" />
-      ) : (
-        <CheckCircle2 className="h-3.5 w-3.5" />
-      )}
-      <Wrench className="h-3.5 w-3.5 opacity-70" />
-      <span className="truncate max-w-[18rem]">{label}</span>
+    <div className="my-1">
+      <div
+        className={cn(
+          "inline-flex items-center gap-2 text-xs rounded-md px-2 py-1 border",
+          isRunning
+            ? "border-blue-300 bg-blue-50 text-blue-700"
+            : "border-green-300 bg-green-50 text-green-700"
+        )}
+      >
+        {isRunning ? (
+          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+        ) : (
+          <CheckCircle2 className="h-3.5 w-3.5" />
+        )}
+        <Wrench className="h-3.5 w-3.5 opacity-70" />
+        <span className="truncate max-w-[18rem]">{label}</span>
+        {toolName ? (
+          <span className="ml-2 text-[10px] opacity-70">({toolName})</span>
+        ) : null}
+      </div>
     </div>
   );
 }
