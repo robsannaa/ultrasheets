@@ -403,11 +403,13 @@ function extractWorkbookData() {
       for (const headerRow of headerCandidates) {
         const rowData = cellData[headerRow] || {};
         const headers: string[] = [];
+        let firstCol = -1;
         let lastCol = -1;
         for (let c = 0; c <= Math.min(maxCol, 50); c++) {
           const cell = rowData[c];
           if (cell && typeof cell.v === "string" && cell.v.trim() && !cell.f) {
             headers.push(String(cell.v).trim());
+            if (firstCol === -1) firstCol = c;
             lastCol = c;
           } else if (headers.length > 0) break;
         }
@@ -421,7 +423,7 @@ function extractWorkbookData() {
         ) {
           const rd = cellData[r] || {};
           let hasData = false;
-          for (let c = 0; c <= lastCol; c++) {
+          for (let c = firstCol; c <= lastCol; c++) {
             const cell = rd[c];
             if (
               cell &&
@@ -437,13 +439,14 @@ function extractWorkbookData() {
           else if (recordCount > 0) break;
         }
 
+        const startColLetter = String.fromCharCode(65 + Math.max(0, firstCol));
         const endColLetter = String.fromCharCode(65 + Math.max(0, lastCol));
-        const range = `A${headerRow + 1}:${endColLetter}${
+        const range = `${startColLetter}${headerRow + 1}:${endColLetter}${
           headerRow + 1 + recordCount
         }`;
 
         const numericColumns: string[] = [];
-        for (let c = 0; c <= lastCol; c++) {
+        for (let c = firstCol; c <= lastCol; c++) {
           let numericHits = 0;
           for (
             let r = headerRow + 1;
@@ -589,7 +592,8 @@ export function ChatSidebar() {
             } else if (action.type === "setCellValue") {
               // Direct cell value/formula set with formula recalculation
               const w: any = window as any;
-              if (!(window as any).univerAPI) throw new Error("Univer API not available");
+              if (!(window as any).univerAPI)
+                throw new Error("Univer API not available");
               const univerAPI = (window as any).univerAPI;
               const workbook = univerAPI.getActiveWorkbook();
               const worksheet = workbook.getActiveSheet();
@@ -787,7 +791,7 @@ export function ChatSidebar() {
 
           // Text alignment - comprehensive approach
           if (action.textAlign !== undefined) {
-            const alignmentValue = action.textAlign;
+            const alignmentValue: 'left' | 'center' | 'right' = action.textAlign;
             console.log(
               `🔍 Attempting to set text alignment to: ${alignmentValue}`
             );
@@ -838,7 +842,7 @@ export function ChatSidebar() {
               for (const methodName of styleMethods) {
                 if (typeof range[methodName] === "function") {
                   try {
-                    const alignmentMap = { left: 1, center: 2, right: 3 };
+                    const alignmentMap: { left: number; center: number; right: number } = { left: 1, center: 2, right: 3 };
                     const styleObj = { ht: alignmentMap[alignmentValue] || 1 };
                     range[methodName](styleObj);
                     console.log(
@@ -862,7 +866,7 @@ export function ChatSidebar() {
 
                 // Check if worksheet has setCellStyle method
                 if (typeof worksheet.setCellStyle === "function") {
-                  const alignmentMap = { left: 1, center: 2, right: 3 };
+                  const alignmentMap: { left: number; center: number; right: number } = { left: 1, center: 2, right: 3 };
                   const styleValue = alignmentMap[alignmentValue] || 1;
 
                   for (let row = startRow; row <= endRow; row++) {
@@ -950,7 +954,7 @@ export function ChatSidebar() {
             if (!alignmentApplied) {
               try {
                 console.log("🔍 Attempting cell data manipulation...");
-                const alignmentMap = { left: 1, center: 2, right: 3 };
+                const alignmentMap: { left: number; center: number; right: number } = { left: 1, center: 2, right: 3 };
                 const styleValue = alignmentMap[alignmentValue] || 1;
 
                 for (let row = startRow; row <= endRow; row++) {
