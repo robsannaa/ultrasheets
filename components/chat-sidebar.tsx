@@ -94,7 +94,24 @@ function ChatMessages({
   return (
     <ScrollArea className="h-full px-1 py-4" ref={scrollAreaRef}>
       <div className="space-y-4">
-        {mergedMessages.map((message) => (
+        {mergedMessages.map((message) => {
+          // Skip rendering empty assistant frames (no text and no tool badges)
+          const hasParts = Array.isArray(message.parts);
+          const hasTextPart = hasParts
+            ? message.parts.some(
+                (p: any) => p.type === "text" && typeof p.text === "string" && p.text.trim().length > 0
+              )
+            : false;
+          const hasToolPart = hasParts
+            ? message.parts.some((p: any) => p.type === "tool-invocation")
+            : false;
+          const hasContent =
+            (typeof message.content === "string" && message.content.trim().length > 0) ||
+            hasTextPart ||
+            hasToolPart;
+          if (message.role === "assistant" && !hasContent) return null;
+
+          return (
           <div
             key={message.id}
             className={cn(
@@ -215,13 +232,14 @@ function ChatMessages({
                   <ReactMarkdown remarkPlugins={[remarkGfm]}>
                     {message.content}
                   </ReactMarkdown>
-                </div>
+            </div>
               ) : (
                 message.content
               )}
             </div>
           </div>
-        ))}
+          );
+        })}
         {/* Typing indicator removed: the send button already shows progress */}
       </div>
     </ScrollArea>
