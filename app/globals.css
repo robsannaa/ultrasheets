@@ -121,3 +121,19 @@
     color-scheme: light dark;
   }
 }
+
+/* Univer OSS watermark overrides (hide watermark overlay/background) */
+/* The library does not currently expose a stable public API to remove the watermark in OSS builds. */
+/* We suppress typical watermark selectors and attributes defensively. */
+[data-watermark],
+[data-water-mark],
+.univer-watermark,
+.watermark,
+[class*="watermark"],
+[class*="water-mark"] {
+  display: none !important;
+  background-image: none !important;
+  -webkit-mask-image: none !important;
+  mask-image: none !important;
+  opacity: 0 !important;
+}
