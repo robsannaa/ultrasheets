@@ -57,10 +57,24 @@ function ChatMessages({
               )}
             >
               {message.parts ? (
-                message.parts.map((part: any, index: number) => {
+                <>
+                  {(() => {
+                    try {
+                      const text = message.parts
+                        .filter((p: any) => p.type === "text" && typeof p.text === "string")
+                        .map((p: any) => p.text)
+                        .join("");
+                      return text ? (
+                        <CollapsibleMarkdown key="assistant-text" text={text} />
+                      ) : null;
+                    } catch {
+                      return null;
+                    }
+                  })()}
+                  {message.parts.map((part: any, index: number) => {
                   switch (part.type) {
                     case "text":
-                      return <CollapsibleMarkdown key={index} text={part.text} />;
+                      return null; // already rendered once above
                     case "tool-invocation": {
                       const callId = part.toolInvocation.toolCallId;
                       const toolName = part.toolInvocation.toolName;
@@ -123,7 +137,8 @@ function ChatMessages({
                       }
                       return null;
                   }
-                })
+                  })}
+                </>
               ) : message.role === "assistant" ? (
                 <div className="leading-6 prose prose-sm max-w-none dark:prose-invert">
                   <ReactMarkdown remarkPlugins={[remarkGfm]}>
@@ -940,7 +955,12 @@ function CollapsibleMarkdown({ text }: { text: string }) {
             </code>
           ),
           a: (props) => (
-            <a className="underline text-blue-600" target="_blank" rel="noreferrer" {...props} />
+            <a
+              className="underline text-blue-600"
+              target="_blank"
+              rel="noreferrer"
+              {...props}
+            />
           ),
         }}
       >
