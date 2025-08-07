@@ -21,6 +21,12 @@ function ChatMessages({
   isLoading: boolean;
 }) {
   const scrollAreaRef = useRef<HTMLDivElement>(null);
+  const [isHydrated, setIsHydrated] = React.useState(false);
+
+  // Avoid SSR/CSR markup mismatch by rendering message list only after hydration
+  useEffect(() => {
+    setIsHydrated(true);
+  }, []);
 
   useEffect(() => {
     if (scrollAreaRef.current) {
@@ -75,6 +81,15 @@ function ChatMessages({
 
   // Track assistant texts we've already rendered during this pass to avoid duplicates
   const seenAssistantTexts = React.useRef<Set<string>>(new Set());
+
+  // During SSR, render an empty container to keep markup stable
+  if (!isHydrated) {
+    return (
+      <ScrollArea className="h-full px-1 py-4" ref={scrollAreaRef}>
+        <div className="space-y-4" />
+      </ScrollArea>
+    );
+  }
 
   return (
     <ScrollArea className="h-full px-1 py-4" ref={scrollAreaRef}>
@@ -148,9 +163,9 @@ function ChatMessages({
 
                         if (state === "call") {
                           if (toolName === "get_sheet_context") return null;
-                          return (
+                              return (
                             <ToolBadge
-                              key={callId}
+                                  key={callId}
                               label={label}
                               toolName={toolName}
                               state="call"
@@ -264,10 +279,10 @@ function extractWorkbookData() {
       return null;
     const w: any = window as any;
     const univerAPI = w.univerAPI;
-    const workbook = univerAPI.getActiveWorkbook();
+      const workbook = univerAPI.getActiveWorkbook();
     if (!workbook || typeof workbook.save !== "function") return null;
 
-    const activeSheet = workbook.getActiveSheet();
+      const activeSheet = workbook.getActiveSheet();
     const activeSnapshot = activeSheet?.getSheet()?.getSnapshot();
     const activeName = activeSnapshot?.name;
 
@@ -332,12 +347,12 @@ function extractWorkbookData() {
           let hasData = false;
           for (let c = firstCol; c <= lastCol; c++) {
             const cell = rd[c];
-            if (
-              cell &&
-              cell.v !== undefined &&
-              cell.v !== null &&
-              cell.v !== ""
-            ) {
+          if (
+            cell &&
+            cell.v !== undefined &&
+            cell.v !== null &&
+            cell.v !== ""
+          ) {
               hasData = true;
               break;
             }
@@ -444,28 +459,28 @@ export function ChatSidebar() {
       const lastMessage = messages[messages.length - 1];
       if (lastMessage?.role !== "assistant" || !lastMessage.parts) return;
 
-      for (const part of lastMessage.parts) {
-        if (
-          part.type === "tool-invocation" &&
-          part.toolInvocation.state === "result"
-        ) {
+        for (const part of lastMessage.parts) {
+          if (
+            part.type === "tool-invocation" &&
+            part.toolInvocation.state === "result"
+          ) {
           const callId: string | undefined = part.toolInvocation.toolCallId;
           // Deduplicate by toolCallId to prevent re-execution flicker
           if (callId && executedToolCallIdsRef.current.has(callId)) continue;
 
-          const result = part.toolInvocation.result;
+            const result = part.toolInvocation.result;
           if (!result || !result.clientSideAction) continue;
 
-          const action = result.clientSideAction;
-          try {
-            if (
-              action.type === "executeUniverTool" &&
-              window.executeUniverTool
-            ) {
+              const action = result.clientSideAction;
+              try {
+                if (
+                  action.type === "executeUniverTool" &&
+                  window.executeUniverTool
+                ) {
               const execResult = await window.executeUniverTool(
-                action.toolName,
-                action.params
-              );
+                    action.toolName,
+                    action.params
+                  );
               // Record recent action for richer LLM context
               try {
                 const w: any = window as any;
@@ -483,8 +498,8 @@ export function ChatSidebar() {
                 });
                 if (w.ultraActionLog.length > 50) w.ultraActionLog.shift();
               } catch {}
-            } else if (action.type === "formatCells") {
-              await formatCells(action);
+                } else if (action.type === "formatCells") {
+                  await formatCells(action);
               try {
                 const w: any = window as any;
                 w.ultraActionLog = w.ultraActionLog || [];
@@ -536,8 +551,8 @@ export function ChatSidebar() {
 
             // Mark as executed only after successful run
             if (callId) executedToolCallIdsRef.current.add(callId);
-          } catch (error) {
-            console.error("Failed to execute client-side action:", error);
+              } catch (error) {
+                console.error("Failed to execute client-side action:", error);
             // Do not mark executed on failure to allow retry on next render
           }
         }
@@ -549,7 +564,7 @@ export function ChatSidebar() {
 
   // Format cells function
   const formatCells = async (action: any) => {
-    const univerAPI = (window as any).univerAPI;
+        const univerAPI = (window as any).univerAPI;
     await applyFormatting(univerAPI, action);
   };
 

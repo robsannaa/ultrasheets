@@ -28,6 +28,7 @@ export default function RootLayout({
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
+        {/* Keep SSR markup stable; ThemeProvider handles system theme on client */}
         <AppThemeProvider>{children}</AppThemeProvider>
       </body>
     </html>
