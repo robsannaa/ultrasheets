@@ -46,7 +46,7 @@ export function Univer() {
       const sheetsAdvancedEnUS = await import(
         "@univerjs/preset-sheets-advanced/locales/en-US"
       ).then((m) => m.default);
-      const { createUniver, LocaleType, mergeLocales } = await import(
+      const { createUniver, LocaleType, mergeLocales, defaultTheme, greenTheme } = await import(
         "@univerjs/presets"
       );
       const { LifecycleStages } = await import("@univerjs/core");
@@ -172,6 +172,7 @@ export function Univer() {
         },
         presets,
         darkMode: theme === "dark",
+        theme: theme === "dark" ? greenTheme : defaultTheme,
       });
 
       // Force initial formula computing at lifecycle Starting for future workbooks
@@ -188,6 +189,12 @@ export function Univer() {
           );
           window.__ultraUniverLifecycleHookAdded = true;
         }
+        // Sync dark mode on mount and when theme changes
+        try {
+          if (typeof univerAPI.toggleDarkMode === "function") {
+            univerAPI.toggleDarkMode(theme === "dark");
+          }
+        } catch {}
       } catch {}
 
       // Create workbook
@@ -674,7 +681,10 @@ export function Univer() {
           let worksheet: any = workbook.getActiveSheet();
           // Create/switch sheet if requested
           try {
-            if (sheetName && typeof (workbook as any).getSheetByName === "function") {
+            if (
+              sheetName &&
+              typeof (workbook as any).getSheetByName === "function"
+            ) {
               const existing = (workbook as any).getSheetByName(sheetName);
               if (existing) {
                 worksheet = existing;
