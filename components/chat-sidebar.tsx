@@ -56,102 +56,120 @@ function ChatMessages({
                   : "bg-muted"
               )}
             >
-              {message.parts
-                ? message.parts.map((part: any, index: number) => {
-                    switch (part.type) {
-                      case "text":
+              {message.parts ? (
+                message.parts.map((part: any, index: number) => {
+                  switch (part.type) {
+                    case "text":
+                      return (
+                        <div
+                          key={index}
+                          className="leading-6 prose prose-sm max-w-none dark:prose-invert"
+                        >
+                           <ReactMarkdown
+                            remarkPlugins={[remarkGfm]}
+                            components={{
+                              table: (props) => (
+                                 // Collapse large markdown tables from assistant for brevity
+                                 <></>
+                              ),
+                              th: (props) => (
+                                 <></>
+                              ),
+                              td: (props) => (
+                                 <></>
+                              ),
+                              code: ({ inline, children, ...props }: any) => (
+                                <code
+                                  className={cn(
+                                    inline
+                                      ? "px-1 py-0.5 rounded bg-black/10"
+                                      : "block p-3 rounded bg-black/10 overflow-x-auto"
+                                  )}
+                                  {...props}
+                                >
+                                  {children}
+                                </code>
+                              ),
+                              a: (props) => (
+                                <a
+                                  className="underline text-blue-600"
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  {...props}
+                                />
+                              ),
+                            }}
+                          >
+                            {part.text}
+                          </ReactMarkdown>
+                        </div>
+                      );
+                    case "tool-invocation": {
+                      const callId = part.toolInvocation.toolCallId;
+                      const toolName = part.toolInvocation.toolName;
+                      const state = part.toolInvocation.state;
+                      const args = part.toolInvocation.args;
+                      const label = describeTool(toolName, args);
+
+                      if (state === "call") {
+                        if (toolName === "get_sheet_context") return null;
                         return (
-                          <div key={index} className="leading-6 prose prose-sm max-w-none dark:prose-invert">
-                            <ReactMarkdown remarkPlugins={[remarkGfm]}
-                              components={{
-                                table: (props) => (
-                                  <table className="w-full text-left border-collapse my-2" {...props} />
-                                ),
-                                th: (props) => (
-                                  <th className="border px-2 py-1 font-medium" {...props} />
-                                ),
-                                td: (props) => (
-                                  <td className="border px-2 py-1" {...props} />
-                                ),
-                                code: ({ inline, children, ...props }: any) => (
-                                  <code
-                                    className={cn(
-                                      inline
-                                        ? "px-1 py-0.5 rounded bg-black/10"
-                                        : "block p-3 rounded bg-black/10 overflow-x-auto"
-                                    )}
-                                    {...props}
-                                  >
-                                    {children}
-                                  </code>
-                                ),
-                                a: (props) => (
-                                  <a className="underline text-blue-600" target="_blank" rel="noreferrer" {...props} />
-                                ),
-                              }}
-                            >
-                              {part.text}
-                            </ReactMarkdown>
-                          </div>
+                          <ToolBadge key={callId} label={label} state="call" />
                         );
-                      case "tool-invocation": {
-                        const callId = part.toolInvocation.toolCallId;
-                        const toolName = part.toolInvocation.toolName;
-                        const state = part.toolInvocation.state;
-                        const args = part.toolInvocation.args;
-                        const label = describeTool(toolName, args);
-
-                        if (state === "call") {
-                          if (toolName === "get_sheet_context") return null;
-                          return <ToolBadge key={callId} label={label} state="call" />;
-                        } else if (state === "result") {
-                          // Only show result for important operations, hide technical details
-                          const result = part.toolInvocation.result;
-                          if (toolName === "get_sheet_context") {
-                            return null; // Hide sheet context results - too technical
-                          }
-
-                          // Handle new error response format
-                          if (
-                            result &&
-                            typeof result === "object" &&
-                            result.error
-                          ) {
-                            return (
-                              <div
-                                key={callId}
-                                className="text-red-600 text-sm"
-                              >
-                                ⚠️ {result.message || result.error}
-                              </div>
-                            );
-                          }
-                          return <ToolBadge key={callId} label={label} state="result" />;
+                      } else if (state === "result") {
+                        // Only show result for important operations, hide technical details
+                        const result = part.toolInvocation.result;
+                        if (toolName === "get_sheet_context") {
+                          return null; // Hide sheet context results - too technical
                         }
-                        return null;
-                      }
-                      default:
-                        if (message.role === "assistant" && message.content) {
+
+                        // Handle new error response format
+                        if (
+                          result &&
+                          typeof result === "object" &&
+                          result.error
+                        ) {
                           return (
-                            <div key={index} className="leading-6 prose prose-sm max-w-none dark:prose-invert">
-                              <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                                {message.content}
-                              </ReactMarkdown>
+                            <div key={callId} className="text-red-600 text-sm">
+                              ⚠️ {result.message || result.error}
                             </div>
                           );
                         }
-                        return null;
+                        return (
+                          <ToolBadge
+                            key={callId}
+                            label={label}
+                            state="result"
+                          />
+                        );
+                      }
+                      return null;
                     }
-                  })
-                : message.role === "assistant" ? (
-                    <div className="leading-6 prose prose-sm max-w-none dark:prose-invert">
-                      <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                        {message.content}
-                      </ReactMarkdown>
-                    </div>
-                  ) : (
-                    message.content
-                  )}
+                    default:
+                      if (message.role === "assistant" && message.content) {
+                        return (
+                          <div
+                            key={index}
+                            className="leading-6 prose prose-sm max-w-none dark:prose-invert"
+                          >
+                            <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                              {message.content}
+                            </ReactMarkdown>
+                          </div>
+                        );
+                      }
+                      return null;
+                  }
+                })
+              ) : message.role === "assistant" ? (
+                <div className="leading-6 prose prose-sm max-w-none dark:prose-invert">
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                    {message.content}
+                  </ReactMarkdown>
+                </div>
+              ) : (
+                message.content
+              )}
             </div>
           </div>
         ))}
@@ -962,9 +980,13 @@ function describeTool(toolName: string, args: any): string {
     case "create_pivot_table":
       return `Pivot by ${args?.groupBy ?? "group"}`;
     case "generate_chart":
-      return `${args?.chart_type ?? "chart"} chart${args?.title ? `: ${args.title}` : ""}`;
+      return `${args?.chart_type ?? "chart"} chart${
+        args?.title ? `: ${args.title}` : ""
+      }`;
     case "switch_sheet":
-      return `${args?.action === "switch" ? "Switch to" : "Analyze"} ${args?.sheetName ?? "sheet"}`;
+      return `${args?.action === "switch" ? "Switch to" : "Analyze"} ${
+        args?.sheetName ?? "sheet"
+      }`;
     case "financial_intelligence":
       return `Analyze: ${String(args?.user_request ?? "")}`;
     case "add_filter":

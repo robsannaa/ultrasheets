@@ -139,6 +139,11 @@ MULTI-STEP EXECUTION:
 - For comprehensive analysis, chain tools logically
 - Always provide a final summary of all actions taken
 
+RESPONSE STYLE:
+- Be concise. Prefer 1-2 short sentences when confirming actions
+- Do NOT paste or preview full datasets/tables in the chat unless the user explicitly asks to "show the data". Insert the data directly into the sheet using tools
+- Avoid echoing long lists of rows, CSV, or markdown tables. Summarize instead
+
 INTELLIGENT RESPONSES:
 - When users ask vague questions like "list columns" or "do a sum", use the comprehensive sheet context to provide specific, helpful responses
 - For complex financial statements, recognize that data may not be in simple tabular format - look for data regions and header patterns
@@ -195,7 +200,8 @@ Be professional, execute requests immediately, and provide specific insights bas
       temperature: 0.2, // Lower temperature for more deterministic operations
       tools: {
         list_tables: tool({
-          description: "List detected tables across sheets with headers, ranges, and a stable tableId",
+          description:
+            "List detected tables across sheets with headers, ranges, and a stable tableId",
           parameters: z.object({}),
           execute: async () => {
             try {
@@ -299,16 +305,38 @@ Be professional, execute requests immediately, and provide specific insights bas
               .string()
               .optional()
               .describe("Destination range (e.g., 'D1')"),
-            data_range: z.string().optional().describe("Optional source range like 'H1:I20'"),
-            tableId: z.string().optional().describe("Stable tableId from list_tables: '<sheetIndex>:<range>'"),
+            data_range: z
+              .string()
+              .optional()
+              .describe("Optional source range like 'H1:I20'"),
+            tableId: z
+              .string()
+              .optional()
+              .describe(
+                "Stable tableId from list_tables: '<sheetIndex>:<range>'"
+              ),
           }),
-          execute: async ({ groupBy, valueColumn, aggFunc, destination, data_range, tableId }) => {
+          execute: async ({
+            groupBy,
+            valueColumn,
+            aggFunc,
+            destination,
+            data_range,
+            tableId,
+          }) => {
             return {
               message: `Creating pivot table grouping by '${groupBy}' with ${aggFunc} of '${valueColumn}'...`,
               clientSideAction: {
                 type: "executeUniverTool",
                 toolName: "create_pivot_table",
-                params: { groupBy, valueColumn, aggFunc, destination, data_range, tableId },
+                params: {
+                  groupBy,
+                  valueColumn,
+                  aggFunc,
+                  destination,
+                  data_range,
+                  tableId,
+                },
               },
             };
           },
@@ -320,8 +348,16 @@ Be professional, execute requests immediately, and provide specific insights bas
             column: z
               .string()
               .describe("Column name or letter (e.g., 'Sales' or 'B')"),
-            data_range: z.string().optional().describe("Optional source range like 'H1:I20'"),
-            tableId: z.string().optional().describe("Stable tableId from list_tables: '<sheetIndex>:<range>'"),
+            data_range: z
+              .string()
+              .optional()
+              .describe("Optional source range like 'H1:I20'"),
+            tableId: z
+              .string()
+              .optional()
+              .describe(
+                "Stable tableId from list_tables: '<sheetIndex>:<range>'"
+              ),
           }),
           execute: async ({ column, data_range, tableId }) => {
             return {
@@ -344,7 +380,12 @@ Be professional, execute requests immediately, and provide specific insights bas
               .describe(
                 "Data range (e.g., 'A1:B18') - if not provided, will auto-detect data"
               ),
-            tableId: z.string().optional().describe("Stable tableId from list_tables: '<sheetIndex>:<range>'"),
+            tableId: z
+              .string()
+              .optional()
+              .describe(
+                "Stable tableId from list_tables: '<sheetIndex>:<range>'"
+              ),
             chart_type: z
               .enum(["column", "line", "pie", "bar", "scatter"])
               .describe("Chart type - column, line, pie, bar, or scatter"),
