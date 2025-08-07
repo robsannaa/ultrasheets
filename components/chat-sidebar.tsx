@@ -60,52 +60,7 @@ function ChatMessages({
                 message.parts.map((part: any, index: number) => {
                   switch (part.type) {
                     case "text":
-                      return (
-                        <div
-                          key={index}
-                          className="leading-6 prose prose-sm max-w-none dark:prose-invert"
-                        >
-                          <ReactMarkdown
-                            remarkPlugins={[remarkGfm]}
-                            components={{
-                              table: (props) => (
-                                // Collapse large markdown tables from assistant for brevity
-                                <></>
-                              ),
-                              th: (props) => <></>,
-                              td: (props) => <></>,
-                              p: (props) => <p className="mb-1 leading-5" {...props} />,
-                              h1: (props) => <h1 className="mb-1 text-base" {...props} />,
-                              h2: (props) => <h2 className="mb-1 text-sm" {...props} />,
-                              h3: (props) => <h3 className="mb-1 text-sm" {...props} />,
-                              ul: (props) => <ul className="list-disc ml-4 mb-1" {...props} />,
-                              ol: (props) => <ol className="list-decimal ml-4 mb-1" {...props} />,
-                              code: ({ inline, children, ...props }: any) => (
-                                <code
-                                  className={cn(
-                                    inline
-                                      ? "px-1 py-0.5 rounded bg-black/10"
-                                      : "block p-3 rounded bg-black/10 overflow-x-auto"
-                                  )}
-                                  {...props}
-                                >
-                                  {children}
-                                </code>
-                              ),
-                              a: (props) => (
-                                <a
-                                  className="underline text-blue-600"
-                                  target="_blank"
-                                  rel="noreferrer"
-                                  {...props}
-                                />
-                              ),
-                            }}
-                          >
-                            {part.text}
-                          </ReactMarkdown>
-                        </div>
-                      );
+                      return <CollapsibleMarkdown key={index} text={part.text} />;
                     case "tool-invocation": {
                       const callId = part.toolInvocation.toolCallId;
                       const toolName = part.toolInvocation.toolName;
@@ -951,6 +906,58 @@ export function ChatSidebar() {
   );
 }
 
+// Collapsible Markdown to keep assistant replies short by default
+function CollapsibleMarkdown({ text }: { text: string }) {
+  const [expanded, setExpanded] = React.useState(false);
+  const MAX_CHARS = 280;
+  const isLong = text && text.length > MAX_CHARS;
+  const display = expanded || !isLong ? text : text.slice(0, MAX_CHARS) + "…";
+
+  return (
+    <div className="leading-6 prose prose-sm max-w-none dark:prose-invert">
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
+        components={{
+          table: () => <></>,
+          th: () => <></>,
+          td: () => <></>,
+          p: (props) => <p className="mb-1 leading-5" {...props} />,
+          h1: (props) => <h1 className="mb-1 text-base" {...props} />,
+          h2: (props) => <h2 className="mb-1 text-sm" {...props} />,
+          h3: (props) => <h3 className="mb-1 text-sm" {...props} />,
+          ul: (props) => <ul className="list-disc ml-4 mb-1" {...props} />,
+          ol: (props) => <ol className="list-decimal ml-4 mb-1" {...props} />,
+          code: ({ inline, children, ...props }: any) => (
+            <code
+              className={cn(
+                inline
+                  ? "px-1 py-0.5 rounded bg-black/10"
+                  : "block p-3 rounded bg-black/10 overflow-x-auto"
+              )}
+              {...props}
+            >
+              {children}
+            </code>
+          ),
+          a: (props) => (
+            <a className="underline text-blue-600" target="_blank" rel="noreferrer" {...props} />
+          ),
+        }}
+      >
+        {display}
+      </ReactMarkdown>
+      {isLong && (
+        <button
+          type="button"
+          className="mt-1 text-[11px] underline text-blue-600"
+          onClick={() => setExpanded((v) => !v)}
+        >
+          {expanded ? "Show less" : "Show details"}
+        </button>
+      )}
+    </div>
+  );
+}
 function ToolBadge({
   label,
   toolName,
