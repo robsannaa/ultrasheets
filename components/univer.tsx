@@ -479,61 +479,21 @@ export function Univer() {
           }
         };
 
-        // Try built-in first; if not available, fall back to heuristic
+        // Try built-in command only; if unavailable, report error (no heuristic fallback)
         const usedBuiltin = await tryBuiltinCommand(colIndexes);
-
-        if (usedBuiltin) {
+        if (!usedBuiltin) {
           return {
-            success: true,
-            message: `Auto-fitted columns ${columns}`,
-            columns: colIndexes,
-            method: "command",
+            success: false,
+            error:
+              "Auto-fit columns is not supported in this build (native command unavailable).",
           };
-        }
-
-        // Snapshot data
-        const snapshot = fWorksheet.getSheet().getSnapshot();
-        const cellData = snapshot?.cellData || {};
-        const maxRow = Math.min(rowsSampleLimit, snapshot?.rowCount || 10000);
-
-        // Rough width heuristic: use header + top N rows text length, convert to px
-        const toPx = (len: number) =>
-          Math.min(600, Math.max(40, Math.round(len * 7.2 + 16))); // 7.2px/char + padding
-
-        for (const col of colIndexes) {
-          let maxChars = 0;
-          // header row(s): scan first 2 rows for potential header text
-          for (let r = 0; r < Math.min(2, maxRow); r++) {
-            const v = cellData[r]?.[col]?.v;
-            if (v != null) maxChars = Math.max(maxChars, String(v).length);
-          }
-          // sample data rows
-          for (let r = 2; r < maxRow; r++) {
-            const v = cellData[r]?.[col]?.v;
-            if (v != null) maxChars = Math.max(maxChars, String(v).length);
-          }
-
-          const px = toPx(maxChars);
-          try {
-            if (typeof fWorksheet.setColumnWidth === "function") {
-              fWorksheet.setColumnWidth(col, px);
-            } else if (typeof fWorksheet.getRange === "function") {
-              // Fallback: try range style width if supported (some builds expose it)
-              const range = fWorksheet.getRange(0, col, 1, 1) as any;
-              if (range && typeof range.setColumnWidth === "function") {
-                range.setColumnWidth(px);
-              }
-            }
-          } catch (e) {
-            console.warn("⚠️ setColumnWidth not available:", e);
-          }
         }
 
         return {
           success: true,
           message: `Auto-fitted columns ${columns}`,
           columns: colIndexes,
-          method: "heuristic",
+          method: "command",
         };
       };
 
