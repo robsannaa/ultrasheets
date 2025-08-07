@@ -6,9 +6,11 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { Send, Loader2 } from "lucide-react";
+import { Send, Loader2, CheckCircle2, Wrench } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useChat } from "ai/react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 
 function ChatMessages({
   messages,
@@ -58,198 +60,55 @@ function ChatMessages({
                 ? message.parts.map((part: any, index: number) => {
                     switch (part.type) {
                       case "text":
-                        return <span key={index}>{part.text}</span>;
+                        return (
+                          <div key={index} className="leading-6 prose prose-sm max-w-none dark:prose-invert">
+                            <ReactMarkdown remarkPlugins={[remarkGfm]}
+                              components={{
+                                table: (props) => (
+                                  <table className="w-full text-left border-collapse my-2" {...props} />
+                                ),
+                                th: (props) => (
+                                  <th className="border px-2 py-1 font-medium" {...props} />
+                                ),
+                                td: (props) => (
+                                  <td className="border px-2 py-1" {...props} />
+                                ),
+                                code: ({ inline, children, ...props }: any) => (
+                                  <code
+                                    className={cn(
+                                      inline
+                                        ? "px-1 py-0.5 rounded bg-black/10"
+                                        : "block p-3 rounded bg-black/10 overflow-x-auto"
+                                    )}
+                                    {...props}
+                                  >
+                                    {children}
+                                  </code>
+                                ),
+                                a: (props) => (
+                                  <a className="underline text-blue-600" target="_blank" rel="noreferrer" {...props} />
+                                ),
+                              }}
+                            >
+                              {part.text}
+                            </ReactMarkdown>
+                          </div>
+                        );
                       case "tool-invocation": {
                         const callId = part.toolInvocation.toolCallId;
                         const toolName = part.toolInvocation.toolName;
                         const state = part.toolInvocation.state;
                         const args = part.toolInvocation.args;
+                        const label = describeTool(toolName, args);
 
                         if (state === "call") {
-                          switch (toolName) {
-                            case "get_sheet_context":
-                              return (
-                                <div
-                                  key={callId}
-                                  className="text-slate-600 text-sm italic"
-                                >
-                                  Analyzing spreadsheet...
-                                </div>
-                              );
-                            case "list_columns":
-                              return (
-                                <div
-                                  key={callId}
-                                  className="text-slate-600 text-sm italic"
-                                >
-                                  Getting column information...
-                                </div>
-                              );
-                            case "calculate_total":
-                              return (
-                                <div
-                                  key={callId}
-                                  className="text-blue-600 text-sm italic"
-                                >
-                                  Calculating total for column {args.column}...
-                                </div>
-                              );
-                            case "create_pivot_table":
-                              return (
-                                <div
-                                  key={callId}
-                                  className="text-blue-600 text-sm italic"
-                                >
-                                  Creating pivot table grouped by {args.groupBy}
-                                  ...
-                                </div>
-                              );
-                            case "generate_chart":
-                              return (
-                                <div
-                                  key={callId}
-                                  className="text-blue-600 text-sm italic"
-                                >
-                                  Generating {args.chart_type} chart...
-                                </div>
-                              );
-                            case "switch_sheet":
-                              return (
-                                <div
-                                  key={callId}
-                                  className="text-blue-600 text-sm italic"
-                                >
-                                  {args.action === "switch"
-                                    ? "Switching to"
-                                    : "Analyzing"}{" "}
-                                  sheet {args.sheetName}...
-                                </div>
-                              );
-                            case "financial_intelligence":
-                              return (
-                                <div
-                                  key={callId}
-                                  className="text-blue-600 text-sm italic"
-                                >
-                                  Processing: {args.user_request}...
-                                </div>
-                              );
-                            case "ask_for_range":
-                              return (
-                                <div
-                                  key={callId}
-                                  className="text-amber-600 text-sm italic"
-                                >
-                                  Need range specification...
-                                </div>
-                              );
-                            case "add_filter":
-                              return (
-                                <div
-                                  key={callId}
-                                  className="text-blue-600 text-sm italic"
-                                >
-                                  Applying filter...
-                                </div>
-                              );
-                            default:
-                              return (
-                                <div
-                                  key={callId}
-                                  className="text-slate-600 text-sm italic"
-                                >
-                                  Processing...
-                                </div>
-                              );
-                          }
+                          if (toolName === "get_sheet_context") return null;
+                          return <ToolBadge key={callId} label={label} state="call" />;
                         } else if (state === "result") {
                           // Only show result for important operations, hide technical details
                           const result = part.toolInvocation.result;
                           if (toolName === "get_sheet_context") {
                             return null; // Hide sheet context results - too technical
-                          }
-
-                          if (toolName === "financial_intelligence") {
-                            return (
-                              <div
-                                key={callId}
-                                className="text-green-700 text-sm font-medium"
-                              >
-                                ✓ Calculation complete
-                              </div>
-                            );
-                          }
-
-                          if (toolName === "list_columns") {
-                            return (
-                              <div
-                                key={callId}
-                                className="text-green-700 text-sm"
-                              >
-                                ✓ Found {result.columns?.length || 0} columns
-                              </div>
-                            );
-                          }
-
-                          if (toolName === "calculate_total") {
-                            return (
-                              <div
-                                key={callId}
-                                className="text-green-700 text-sm"
-                              >
-                                ✓ Total calculated
-                              </div>
-                            );
-                          }
-
-                          if (toolName === "create_pivot_table") {
-                            return (
-                              <div
-                                key={callId}
-                                className="text-green-700 text-sm"
-                              >
-                                ✓ Pivot table created
-                              </div>
-                            );
-                          }
-
-                          if (toolName === "generate_chart") {
-                            return (
-                              <div
-                                key={callId}
-                                className="text-green-700 text-sm"
-                              >
-                                ✓ Chart generated
-                              </div>
-                            );
-                          }
-
-                          if (toolName === "switch_sheet") {
-                            return (
-                              <div
-                                key={callId}
-                                className="text-green-700 text-sm"
-                              >
-                                ✓ Sheet {result.action || "analyzed"}
-                              </div>
-                            );
-                          }
-
-                          if (toolName === "add_filter") {
-                            return (
-                              <div
-                                key={callId}
-                                className={
-                                  result.success
-                                    ? "text-green-700 text-sm"
-                                    : "text-amber-600 text-sm"
-                                }
-                              >
-                                {result.success
-                                  ? "✓ Filter applied"
-                                  : "⚠️ Filter simulation"}
-                              </div>
-                            );
                           }
 
                           // Handle new error response format
@@ -267,27 +126,32 @@ function ChatMessages({
                               </div>
                             );
                           }
-
-                          // Show clean success messages for other operations
-                          return (
-                            <div
-                              key={callId}
-                              className="text-green-700 text-sm"
-                            >
-                              {typeof result === "string" &&
-                              result.includes("Successfully")
-                                ? "✓ Complete"
-                                : "✓ Done"}
-                            </div>
-                          );
+                          return <ToolBadge key={callId} label={label} state="result" />;
                         }
                         return null;
                       }
                       default:
+                        if (message.role === "assistant" && message.content) {
+                          return (
+                            <div key={index} className="leading-6 prose prose-sm max-w-none dark:prose-invert">
+                              <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                                {message.content}
+                              </ReactMarkdown>
+                            </div>
+                          );
+                        }
                         return null;
                     }
                   })
-                : message.content}
+                : message.role === "assistant" ? (
+                    <div className="leading-6 prose prose-sm max-w-none dark:prose-invert">
+                      <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                        {message.content}
+                      </ReactMarkdown>
+                    </div>
+                  ) : (
+                    message.content
+                  )}
             </div>
           </div>
         ))}
@@ -791,7 +655,8 @@ export function ChatSidebar() {
 
           // Text alignment - comprehensive approach
           if (action.textAlign !== undefined) {
-            const alignmentValue: 'left' | 'center' | 'right' = action.textAlign;
+            const alignmentValue: "left" | "center" | "right" =
+              action.textAlign;
             console.log(
               `🔍 Attempting to set text alignment to: ${alignmentValue}`
             );
@@ -842,7 +707,11 @@ export function ChatSidebar() {
               for (const methodName of styleMethods) {
                 if (typeof range[methodName] === "function") {
                   try {
-                    const alignmentMap: { left: number; center: number; right: number } = { left: 1, center: 2, right: 3 };
+                    const alignmentMap: {
+                      left: number;
+                      center: number;
+                      right: number;
+                    } = { left: 1, center: 2, right: 3 };
                     const styleObj = { ht: alignmentMap[alignmentValue] || 1 };
                     range[methodName](styleObj);
                     console.log(
@@ -866,7 +735,11 @@ export function ChatSidebar() {
 
                 // Check if worksheet has setCellStyle method
                 if (typeof worksheet.setCellStyle === "function") {
-                  const alignmentMap: { left: number; center: number; right: number } = { left: 1, center: 2, right: 3 };
+                  const alignmentMap: {
+                    left: number;
+                    center: number;
+                    right: number;
+                  } = { left: 1, center: 2, right: 3 };
                   const styleValue = alignmentMap[alignmentValue] || 1;
 
                   for (let row = startRow; row <= endRow; row++) {
@@ -954,7 +827,11 @@ export function ChatSidebar() {
             if (!alignmentApplied) {
               try {
                 console.log("🔍 Attempting cell data manipulation...");
-                const alignmentMap: { left: number; center: number; right: number } = { left: 1, center: 2, right: 3 };
+                const alignmentMap: {
+                  left: number;
+                  center: number;
+                  right: number;
+                } = { left: 1, center: 2, right: 3 };
                 const styleValue = alignmentMap[alignmentValue] || 1;
 
                 for (let row = startRow; row <= endRow; row++) {
@@ -1046,4 +923,57 @@ export function ChatSidebar() {
       </div>
     </div>
   );
+}
+
+function ToolBadge({
+  label,
+  state,
+}: {
+  label: string;
+  state: "call" | "result" | "error";
+}) {
+  const isRunning = state === "call";
+  return (
+    <div
+      className={cn(
+        "inline-flex items-center gap-2 text-xs rounded-md px-2 py-1 border",
+        isRunning
+          ? "border-blue-300 bg-blue-50 text-blue-700"
+          : "border-green-300 bg-green-50 text-green-700"
+      )}
+    >
+      {isRunning ? (
+        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+      ) : (
+        <CheckCircle2 className="h-3.5 w-3.5" />
+      )}
+      <Wrench className="h-3.5 w-3.5 opacity-70" />
+      <span className="truncate max-w-[18rem]">{label}</span>
+    </div>
+  );
+}
+
+function describeTool(toolName: string, args: any): string {
+  switch (toolName) {
+    case "list_columns":
+      return "List columns";
+    case "calculate_total":
+      return `Total for ${args?.column ?? "column"}`;
+    case "create_pivot_table":
+      return `Pivot by ${args?.groupBy ?? "group"}`;
+    case "generate_chart":
+      return `${args?.chart_type ?? "chart"} chart${args?.title ? `: ${args.title}` : ""}`;
+    case "switch_sheet":
+      return `${args?.action === "switch" ? "Switch to" : "Analyze"} ${args?.sheetName ?? "sheet"}`;
+    case "financial_intelligence":
+      return `Analyze: ${String(args?.user_request ?? "")}`;
+    case "add_filter":
+      return "Apply filter";
+    case "ask_for_range":
+      return "Need range specification";
+    case "get_sheet_context":
+      return "Analyze spreadsheet";
+    default:
+      return "Processing";
+  }
 }
