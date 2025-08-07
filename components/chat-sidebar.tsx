@@ -104,13 +104,14 @@ function ChatMessages({
                 <>
                   {(() => {
                     try {
-                      const text = message.parts
-                        .filter(
-                          (p: any) =>
-                            p.type === "text" && typeof p.text === "string"
-                        )
-                        .map((p: any) => p.text)
-                        .join("");
+                      // Render only the final assistant text part (post-tool result),
+                      // instead of concatenating all text parts which can duplicate intent text.
+                      const lastTextPart = [...message.parts]
+                        .reverse()
+                        .find(
+                          (p: any) => p.type === "text" && typeof p.text === "string"
+                        );
+                      const text = lastTextPart?.text ?? "";
                       // Deduplicate identical assistant texts within the same render pass
                       const normalized = (text || "")
                         .replace(/\s+/g, " ")
