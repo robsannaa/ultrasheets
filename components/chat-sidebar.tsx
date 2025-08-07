@@ -32,10 +32,50 @@ function ChatMessages({
     }
   }, [messages]);
 
+  // Merge adjacent assistant messages with identical text to avoid repeated blocks
+  const mergedMessages = React.useMemo(() => {
+    const result: any[] = [];
+    const normalize = (s: string) => (s || "").replace(/\s+/g, " ").trim();
+    const getText = (m: any) => {
+      if (Array.isArray(m.parts)) {
+        try {
+          return m.parts
+            .filter((p: any) => p.type === "text" && typeof p.text === "string")
+            .map((p: any) => p.text)
+            .join("");
+        } catch {
+          return m.content || "";
+        }
+      }
+      return m.content || "";
+    };
+
+    for (const m of messages) {
+      if (
+        result.length > 0 &&
+        m.role === "assistant" &&
+        result[result.length - 1].role === "assistant"
+      ) {
+        const prev = result[result.length - 1];
+        if (normalize(getText(prev)) === normalize(getText(m))) {
+          // merge tool parts; keep one text block
+          const merged = {
+            ...prev,
+            parts: [...(prev.parts || []), ...(m.parts || [])],
+          };
+          result[result.length - 1] = merged;
+          continue;
+        }
+      }
+      result.push(m);
+    }
+    return result;
+  }, [messages]);
+
   return (
     <ScrollArea className="h-full px-1 py-4" ref={scrollAreaRef}>
       <div className="space-y-4">
-        {messages.map((message) => (
+        {mergedMessages.map((message) => (
           <div
             key={message.id}
             className={cn(
