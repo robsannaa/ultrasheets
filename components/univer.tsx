@@ -3,6 +3,8 @@
 import { useEffect, useRef } from "react";
 
 import "@univerjs/preset-sheets-core/lib/index.css";
+// Enable formula facade API (VLOOKUP/INDEX/MATCH and 500+ functions)
+import "@univerjs/sheets-formula/facade";
 
 // Global tool execution handler
 declare global {
@@ -19,8 +21,10 @@ export function Univer() {
     // Dynamic imports to avoid SSR issues
     const initializeUniver = async () => {
       const { UniverSheetsCorePreset } = await import("@univerjs/preset-sheets-core");
+      const { CalculationMode } = await import("@univerjs/preset-sheets-core");
       const sheetsCoreEnUS = await import("@univerjs/preset-sheets-core/locales/en-US").then(m => m.default);
       const { createUniver, LocaleType, mergeLocales } = await import("@univerjs/presets");
+      const { LifecycleStages } = await import("@univerjs/core");
       
       // Note: Advanced and drawing presets cause dependency conflicts, keeping simple for now
       
@@ -51,6 +55,10 @@ export function Univer() {
       const presets = [
         UniverSheetsCorePreset({
           container: containerRef.current,
+          // Ensure formulas compute deterministically on load
+          formula: {
+            initialFormulaComputing: CalculationMode.FORCED,
+          },
         }),
       ];
       
@@ -70,6 +78,16 @@ export function Univer() {
         },
         presets,
       });
+
+      // Force initial formula computing at lifecycle Starting for future workbooks
+      try {
+        univerAPI.addEvent(univerAPI.Event.LifeCycleChanged, ({ stage }: { stage: any }) => {
+          if (stage === LifecycleStages.Starting) {
+            const formula = univerAPI.getFormula();
+            formula.setInitialFormulaComputing(CalculationMode.FORCED);
+          }
+        });
+      } catch {}
 
       // Create workbook
       univerAPI.createWorkbook({});
@@ -441,6 +459,11 @@ export function Univer() {
         // Place the formula in the spreadsheet using Univer API
         const sumRange = worksheet.getRange(sumRow, columnIndex, 1, 1);
         sumRange.setValue(sumFormula);
+        // Execute formula calculation to avoid stale or flickering values
+        try {
+          const formula = univerAPI.getFormula();
+          formula.executeCalculation();
+        } catch {}
 
         console.log(
           `✅ calculate_total: Successfully placed sum in ${sumCell}`
