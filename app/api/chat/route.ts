@@ -20,7 +20,7 @@ export async function POST(req: Request) {
       );
     }
 
-    const { messages, workbookData } = await req.json();
+    const { messages, workbookData, clientEnv } = await req.json();
 
     if (!messages || !Array.isArray(messages)) {
       return new Response(
@@ -69,21 +69,41 @@ export async function POST(req: Request) {
           (s: any) =>
             `- ${s.isActive ? "*" : ""}${s.name}: ${
               s.structure?.totalCells || 0
-            } cells; tables: ${summarizeTables(s.tables)}`
+            } cells; usedRange: ${
+              s.usedRange || "(empty)"
+            }; tables: ${summarizeTables(s.tables)}`
         )
         .join("\n");
 
-      const recentActions = Array.isArray(workbookData.recentActions)
-        ? workbookData.recentActions
-            .slice(-10)
-            .map(
-              (a: any) =>
-                `• ${a.at}: ${a.tool}(${JSON.stringify(a.params)}) => ${
-                  a.result || "ok"
-                }`
-            )
-            .join("\n")
-        : "none";
+      const recentActionsArray = Array.isArray(workbookData.recentActions)
+        ? workbookData.recentActions.slice(-10)
+        : [];
+      const recentActions =
+        recentActionsArray
+          .map(
+            (a: any) =>
+              `• ${a.at}: ${a.tool}(${JSON.stringify(a.params)}) => ${
+                a.result || "ok"
+              }`
+          )
+          .join("\n") || "none";
+
+      // Extract last chart context from recent actions to enable follow-up edits like "add category"
+      const lastChartAction = [...recentActionsArray]
+        .reverse()
+        .find((a: any) => a?.tool === "generate_chart" && a?.params);
+      const lastChart = lastChartAction?.params
+        ? {
+            chart_type: lastChartAction.params.chart_type,
+            data_range: lastChartAction.params.data_range || null,
+            x_column: lastChartAction.params.x_column || null,
+            y_columns: lastChartAction.params.y_columns || null,
+            position: lastChartAction.params.position || null,
+            width: lastChartAction.params.width || null,
+            height: lastChartAction.params.height || null,
+            title: lastChartAction.params.title || null,
+          }
+        : null;
 
       const inferredDataRange =
         activeSheet &&
@@ -107,6 +127,8 @@ ACTIVE SHEET DETAILS:
 RECENT ACTIONS:
 ${recentActions}
 
+${lastChart ? `LAST_CHART:\n${JSON.stringify(lastChart, null, 2)}` : ""}
+
 Guidance:
 - Prefer using detected tables (headers + ranges) for operations.
 - When multiple tables exist, pick the one matching the user's intent; otherwise ask to disambiguate.
@@ -117,9 +139,44 @@ Guidance:
       console.log("⚠️ No workbook data received from frontend");
     }
 
+    // Derive runtime date/time and human-readable location hints
+    const now = new Date();
+    const serverIso = now.toISOString();
+    const clientTimeZone = clientEnv?.timeZone || "UTC";
+    const clientLocale = clientEnv?.locale || "en-US";
+    let clientLocalTime = serverIso;
+    try {
+      clientLocalTime = new Intl.DateTimeFormat(clientLocale, {
+        dateStyle: "full",
+        timeStyle: "long",
+        timeZone: clientTimeZone,
+      }).format(now);
+    } catch {}
+    const platformInfo = clientEnv?.platform
+      ? ` | platform: ${clientEnv.platform}`
+      : "";
+    const locationHint = clientTimeZone
+      ? `timezone: ${clientTimeZone}${platformInfo}`
+      : `platform: ${platformInfo || "unknown"}`;
+    let approxLocation = "";
+    try {
+      if (clientTimeZone && clientTimeZone.includes("/")) {
+        const [regionRaw, cityRaw] = clientTimeZone.split("/");
+        const region = regionRaw.replace(/_/g, " ");
+        const city = cityRaw.replace(/_/g, " ");
+        approxLocation = `${city}, ${region}`;
+      }
+    } catch {}
+
     const result = streamText({
       model: openai("gpt-4o-mini"),
       system: `You are a professional spreadsheet analysis assistant with access to powerful tools for data manipulation and visualization.
+
+RUNTIME CONTEXT:
+- Server time (ISO): ${serverIso}
+- Client local time: ${clientLocalTime}
+- Client locale and location hint: ${clientLocale} (${locationHint})
+- Approx location (from timezone): ${approxLocation || "unknown"}
 
 INSTRUCTIONS:
 - You have direct access to comprehensive spreadsheet data from ALL sheets in the workbook
@@ -145,6 +202,11 @@ RESPONSE STYLE:
 - Avoid echoing long lists of rows, CSV, or markdown tables. Summarize instead
  - When you add or modify data, do not list the rows you added. Respond like: "Added 5 rows to Sheet1" or "Updated the total in B19". Only show concrete values on direct request
 
+DATA CREATION POLICY:
+- If the user asks to "create" data (e.g., a financial statement, a random dataset, or sample data) and the sheet is empty or missing needed values, you MUST generate plausible numeric values (not only labels) and write them into the sheet immediately.
+- Prefer writing entire blocks with bulk_set_values. After writing numbers, add simple derived formulas where helpful (e.g., Gross Profit = Revenue − COGS; Net Cash Flow = SUM of cash flows).
+- Do not ask the user to provide data first unless they explicitly demand realism tied to their own figures.
+
 INTELLIGENT RESPONSES:
 - When users ask vague questions like "list columns" or "do a sum", use the comprehensive sheet context to provide specific, helpful responses
 - For complex financial statements, recognize that data may not be in simple tabular format - look for data regions and header patterns
@@ -155,12 +217,23 @@ INTELLIGENT RESPONSES:
 - Always call the appropriate tool to get actual data - never guess or fabricate numbers
 - When encountering non-standard layouts, use the data regions and structural analysis to understand the layout
 
+FOLLOW-UP MODIFICATION POLICY (Charts):
+- If the user refers to "the chart" or "previous chart", use LAST_CHART above as the base configuration.
+- If they ask to restrict to specific columns (e.g., "date and net income"), call generate_chart with x_column and y_columns set precisely to those headers.
+- If they ask to "add category" or split the series by a categorical column, first create a pivot table that groups by the X column and splits series by the categorical column, then generate the chart from that pivot range.
+- Place follow-up charts near the previous one unless the user specifies a new position.
+- Never include extra columns when the user specifies exact columns.
+
 TOOL SELECTION GUIDE:
 - "list columns" or "show columns" → Use list_columns tool
 - When there may be multiple tables, use list_tables first, then pass tableId or data_range to downstream tools
 - "sum column X" or "total column X" or just "do a sum" → Use calculate_total tool (automatically places sum in spreadsheet)
 - "create pivot table" or "group by X" → Use create_pivot_table tool (writes pivot table to spreadsheet)
 - "create chart" or "generate chart" → Use generate_chart tool
+- When inserting or moving content (pivot tables, charts, pasted ranges), choose a destination in an empty area. Prefer:
+  1) the first empty block to the right of the used range on the active sheet,
+  2) or below the used range if right side is not spacious enough,
+  3) or a new sheet if there is no sufficient space. Use usedRange provided in the context.
 - "set cell X to Y" → Use set_cell_value tool
 - "format as USD", "format as currency", "add $ symbol" → Use format_currency tool (applies proper currency formatting). For "format the total", omit range parameter to auto-detect recent totals
 - "make X bold", "format headers", "center text", "align center", "rotate text", "wrap text" → Use format_cells tool (comprehensive formatting). Supports: textAlign (left/center/right), verticalAlign (top/middle/bottom), textRotation (degrees), textWrap (overflow/truncate/wrap)
@@ -259,10 +332,6 @@ Be professional, execute requests immediately, and provide specific insights bas
           }),
           execute: async ({ cell, value, formula = false }) => {
             try {
-              console.log(
-                `🔍 set_cell_value: Setting ${cell} = ${value} (formula: ${formula})`
-              );
-
               return {
                 success: true,
                 cell,
@@ -285,6 +354,186 @@ Be professional, execute requests immediately, and provide specific insights bas
                 success: false,
               };
             }
+          },
+        }),
+
+        bulk_set_values: tool({
+          description:
+            "Write a 2D array of values starting at a given top-left cell (efficient for creating datasets).",
+          parameters: z.object({
+            startCell: z
+              .string()
+              .describe("Top-left A1 cell, e.g., 'A1' or 'C5'"),
+            values: z
+              .array(z.array(z.union([z.string(), z.number()])))
+              .min(1)
+              .describe("2D array of row-major values to write"),
+          }),
+          execute: async ({ startCell, values }) => {
+            try {
+              return {
+                success: true,
+                startCell,
+                rows: values.length,
+                cols: values[0]?.length ?? 0,
+                clientSideAction: {
+                  type: "setRangeValues",
+                  startCell,
+                  values,
+                },
+                message: `Wrote ${values.length}x${
+                  values[0]?.length ?? 0
+                } block at ${startCell}`,
+              };
+            } catch (error) {
+              console.error("❌ bulk_set_values: Server-side error:", error);
+              return {
+                error: "Failed to write block",
+                success: false,
+              };
+            }
+          },
+        }),
+
+        set_range_values: tool({
+          description:
+            "Write a 2D array of values to an explicit A1 range (e.g., 'A1:C10').",
+          parameters: z.object({
+            range: z.string().describe("A1 range like 'A1:C10'"),
+            values: z
+              .array(z.array(z.union([z.string(), z.number()])))
+              .min(1)
+              .describe("2D array of row-major values to write"),
+          }),
+          execute: async ({ range, values }) => {
+            try {
+              return {
+                success: true,
+                range,
+                rows: values.length,
+                cols: values[0]?.length ?? 0,
+                clientSideAction: {
+                  type: "setRangeValuesByRange",
+                  range,
+                  values,
+                },
+                message: `Wrote ${values.length}x${
+                  values[0]?.length ?? 0
+                } into ${range}`,
+              };
+            } catch (error) {
+              console.error("❌ set_range_values: Server-side error:", error);
+              return {
+                error: "Failed to write range",
+                success: false,
+              };
+            }
+          },
+        }),
+
+        clear_range: tool({
+          description:
+            "Clear values and formatting of any range/selection (delete contents). Supports 'A1:C10', 'A:A', '2:2', 'Sheet1!B:D', or named ranges.",
+          parameters: z.object({
+            range: z
+              .string()
+              .describe(
+                "Range or selection to clear: 'A1:C10', full column 'A:A', full row '2:2', 'Sheet1!B:D', or a named range"
+              ),
+          }),
+          execute: async ({ range }) => {
+            return {
+              success: true,
+              range,
+              clientSideAction: {
+                type: "clearRange",
+                range,
+              },
+              message: `Cleared ${range}`,
+            };
+          },
+        }),
+
+        clear_range_contents: tool({
+          description:
+            "Clear only values in a range/selection (keep formatting) — like Delete key. Supports columns, rows, sheet-scoped ranges, or named ranges.",
+          parameters: z.object({
+            range: z
+              .string()
+              .describe(
+                "Range or selection: 'A1:C10', 'A:A', '2:2', 'Sheet1!B:D', or a named range"
+              ),
+          }),
+          execute: async ({ range }) => {
+            return {
+              success: true,
+              range,
+              clientSideAction: {
+                type: "clearRangeContents",
+                range,
+              },
+              message: `Cleared contents in ${range}`,
+            };
+          },
+        }),
+
+        move_range: tool({
+          description:
+            "Move a block from a source range/selection to a destination start cell (cut+paste).",
+          parameters: z.object({
+            sourceRange: z
+              .string()
+              .describe(
+                "Source range/selection, e.g., 'A1:C10', 'A:A', '2:2', 'Sheet1!B:D', or a named range"
+              ),
+            destStartCell: z
+              .string()
+              .describe("Destination top-left A1 cell, e.g., 'E1'")
+              .default("A1"),
+            clearSource: z.boolean().optional().default(true),
+          }),
+          execute: async ({
+            sourceRange,
+            destStartCell,
+            clearSource = true,
+          }) => {
+            return {
+              success: true,
+              clientSideAction: {
+                type: "moveRange",
+                sourceRange,
+                destStartCell,
+                clearSource,
+              },
+              message: `Moved ${sourceRange} to ${destStartCell}`,
+            };
+          },
+        }),
+
+        transpose_range: tool({
+          description:
+            "Transpose a source range/selection to a destination start cell (rows↔cols).",
+          parameters: z.object({
+            sourceRange: z
+              .string()
+              .describe(
+                "Source range/selection, e.g., 'A1:C10', 'A:A', '2:2', 'Sheet1!B:D', or a named range"
+              ),
+            destStartCell: z
+              .string()
+              .describe("Destination top-left A1 cell, e.g., 'E1'")
+              .default("A1"),
+          }),
+          execute: async ({ sourceRange, destStartCell }) => {
+            return {
+              success: true,
+              clientSideAction: {
+                type: "transposeRange",
+                sourceRange,
+                destStartCell,
+              },
+              message: `Transposed ${sourceRange} into ${destStartCell}`,
+            };
           },
         }),
 
@@ -389,6 +638,18 @@ Be professional, execute requests immediately, and provide specific insights bas
               .describe(
                 "Data range (e.g., 'A1:B18') - if not provided, will auto-detect data"
               ),
+            x_column: z
+              .string()
+              .optional()
+              .describe(
+                "Optional X-axis column header (e.g., 'Date'). When provided, restrict chart to this X column."
+              ),
+            y_columns: z
+              .union([z.string(), z.array(z.string())])
+              .optional()
+              .describe(
+                "Optional Y-axis column header(s). When provided, restrict chart to these Y columns."
+              ),
             tableId: z
               .string()
               .optional()
@@ -414,6 +675,8 @@ Be professional, execute requests immediately, and provide specific insights bas
           }),
           execute: async ({
             data_range,
+            x_column,
+            y_columns,
             tableId,
             chart_type,
             title,
@@ -428,6 +691,8 @@ Be professional, execute requests immediately, and provide specific insights bas
                 toolName: "generate_chart",
                 params: {
                   data_range,
+                  x_column,
+                  y_columns,
                   tableId,
                   chart_type,
                   title,
@@ -836,7 +1101,13 @@ Be professional, execute requests immediately, and provide specific insights bas
                 "Optional theme name (must exist). If omitted, default theme is used."
               ),
           }),
-          execute: async ({ range, name, tableId, showHeader = true, theme }) => {
+          execute: async ({
+            range,
+            name,
+            tableId,
+            showHeader = true,
+            theme,
+          }) => {
             return {
               message: `Formatting ${range} as table...`,
               clientSideAction: {

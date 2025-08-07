@@ -10,7 +10,7 @@ import {
 export default function Home() {
   return (
     <SidebarProvider>
-      <div className="max-h-screen w-screen bg-gray-200">
+      <div className="h-svh w-svw min-h-0 bg-background">
         <ResizablePanelGroup direction="horizontal">
           <ResizablePanel
             defaultSize={75}

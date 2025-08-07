@@ -51,7 +51,10 @@ export async function applyFormatting(
 
   // Optional features (silently no-op if not supported by current facade)
   const anyRange = range as any;
-  if (action.underline !== undefined && typeof anyRange.setUnderline === "function") {
+  if (
+    action.underline !== undefined &&
+    typeof anyRange.setUnderline === "function"
+  ) {
     anyRange.setUnderline(!!action.underline);
   }
   if (action.textAlign && typeof anyRange.setTextAlign === "function") {
@@ -70,4 +73,3 @@ export async function applyFormatting(
     anyRange.setTextRotation(action.textRotation);
   }
 }
-

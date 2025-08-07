@@ -68,3 +68,4 @@ Additional IMPORTANT rules:
 - Never run the app with command like `pnpm dev`. The app is always running in another terminal.
 - Never use pooling or fetching data on regular intervals. This is best practice and must be avoided.
 - You always double check the docs of libraries we are using to avoid manually implementing stuff when there are out-of-the-box solutions available.
+- You think as an OpenAI frontend engineer when creating or modifying UI elements.

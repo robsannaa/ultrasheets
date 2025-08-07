@@ -373,8 +373,84 @@ export function Univer() {
         if (bold !== undefined) builder.setBold(!!bold);
         if (italic !== undefined) builder.setItalic(!!italic);
 
-        const rule = builder.setRanges([fRange.getRange()]).build();
-        fWorksheet.addConditionalFormattingRule(rule);
+        try {
+          // Preferred API path (if supported by current Univer build)
+          if (typeof (builder as any).setRanges === "function") {
+            const rule = (builder as any)
+              .setRanges([fRange.getRange()])
+              .build();
+            (fWorksheet as any).addConditionalFormattingRule(rule);
+          } else {
+            // Fallback: emulate conditional formatting by styling cells that match
+            const startRow = (fRange as any).getRow?.() ?? 0;
+            const endRow = (fRange as any).getLastRow?.() ?? startRow;
+            const startCol = (fRange as any).getColumn?.() ?? 0;
+            const endCol = (fRange as any).getLastColumn?.() ?? startCol;
+
+            const parseNumber = (val: any): number => {
+              if (typeof val === "number") return val;
+              if (typeof val === "string") {
+                const cleaned = val
+                  .replace(/[,$\s]/g, "")
+                  .replace(/[A-Za-z€£¥$]/g, "");
+                const n = parseFloat(cleaned);
+                return isNaN(n) ? 0 : n;
+              }
+              return 0;
+            };
+
+            const matches = (n: number) => {
+              switch (ruleType) {
+                case "number_between":
+                  return n >= (min ?? n) && n <= (max ?? n);
+                case "number_gt":
+                  return n > (min ?? 0);
+                case "number_gte":
+                  return n >= (min ?? 0);
+                case "number_lt":
+                  return n < (max ?? 0);
+                case "number_lte":
+                  return n <= (max ?? 0);
+                case "number_eq":
+                  return n === (equals ?? n);
+                case "number_neq":
+                  return n !== (equals ?? n + 1);
+                case "not_empty":
+                  return true; // any non-empty handled below
+                case "empty":
+                  return false; // skip here
+                default:
+                  return false;
+              }
+            };
+
+            for (let r = startRow; r <= endRow; r++) {
+              for (let c = startCol; c <= endCol; c++) {
+                const cellRange: any = (fWorksheet as any).getRange(r, c, 1, 1);
+                const v = (cellRange as any).getValue?.();
+                const isEmpty = v === undefined || v === null || v === "";
+                const n = parseNumber(v);
+                const ok =
+                  ruleType === "empty"
+                    ? isEmpty
+                    : ruleType === "not_empty"
+                    ? !isEmpty
+                    : matches(n);
+                if (ok) {
+                  if (background) cellRange.setBackground?.(background);
+                  if (fontColor) cellRange.setFontColor?.(fontColor);
+                  if (bold !== undefined) cellRange.setBold?.(!!bold);
+                  if (italic !== undefined) cellRange.setItalic?.(!!italic);
+                }
+              }
+            }
+          }
+        } catch (e) {
+          console.warn(
+            "⚠️ Conditional formatting builder unavailable, applied fallback styling.",
+            e
+          );
+        }
 
         return {
           success: true,
@@ -1228,6 +1304,8 @@ export function Univer() {
 
         const {
           data_range,
+          x_column,
+          y_columns,
           tableId,
           chart_type,
           title,
@@ -1324,6 +1402,65 @@ export function Univer() {
             console.log(
               `📊 executeGenerateChart: Auto-detected data range: ${finalDataRange}`
             );
+          }
+
+          // If x/y columns are specified, narrow the data range to just those columns
+          if ((x_column || y_columns) && finalDataRange) {
+            try {
+              const [start, end] = finalDataRange.split(":");
+              const startRow = parseInt(start.replace(/\D+/g, ""), 10) - 1;
+              const startColLetter = start.replace(/\d+/g, "");
+              const startColIndex = startColLetter.charCodeAt(0) - 65;
+
+              const cellData = sheetSnapshot.cellData;
+              const headerRowIndex = startRow; // headers at the first row of the range
+              const headers: string[] = [];
+              const rowData = cellData[headerRowIndex] || {};
+              // collect headers across the range width
+              const endColLetter = end.replace(/\d+/g, "");
+              const endColIndex = endColLetter.charCodeAt(0) - 65;
+              for (let c = startColIndex; c <= endColIndex; c++) {
+                const cell = rowData[c];
+                const hv = cell?.v;
+                headers.push(typeof hv === "string" ? hv : String(hv ?? ""));
+              }
+
+              const desiredX = x_column
+                ? String(x_column).trim().toLowerCase()
+                : null;
+              const desiredYs = Array.isArray(y_columns)
+                ? y_columns.map((s: any) => String(s).trim().toLowerCase())
+                : typeof y_columns === "string"
+                ? [String(y_columns).trim().toLowerCase()]
+                : [];
+
+              const keepCols: number[] = [];
+              for (let idx = 0; idx < headers.length; idx++) {
+                const h = String(headers[idx] || "")
+                  .trim()
+                  .toLowerCase();
+                if (desiredX && h === desiredX) keepCols.push(idx);
+                if (desiredYs.length && desiredYs.includes(h))
+                  keepCols.push(idx);
+              }
+
+              const uniqueKeep = Array.from(new Set(keepCols)).sort(
+                (a, b) => a - b
+              );
+              if (uniqueKeep.length >= 1) {
+                const first = uniqueKeep[0];
+                const last = uniqueKeep[uniqueKeep.length - 1];
+                const firstLetter = String.fromCharCode(
+                  65 + startColIndex + first
+                );
+                const lastLetter = String.fromCharCode(
+                  65 + startColIndex + last
+                );
+                const startRowNum = parseInt(start.replace(/\D+/g, ""), 10);
+                const endRowNum = parseInt(end.replace(/\D+/g, ""), 10);
+                finalDataRange = `${firstLetter}${startRowNum}:${lastLetter}${endRowNum}`;
+              }
+            } catch {}
           }
 
           // Determine chart position
@@ -2107,6 +2244,15 @@ export function Univer() {
 
     initializeUniver().catch(console.error);
   }, []);
+
+  // Sync Univer dark mode when the app theme changes (including reuse path)
+  useEffect(() => {
+    try {
+      const api: any =
+        (window as any)?.__ultraUniverAPI || (window as any)?.univerAPI;
+      if (api?.toggleDarkMode) api.toggleDarkMode(resolvedTheme === "dark");
+    } catch {}
+  }, [resolvedTheme]);
 
   return <div ref={containerRef} className="h-full" />;
 }

@@ -44,6 +44,9 @@ importers:
       '@univerjs/preset-sheets-advanced':
         specifier: ^0.10.2
         version: 0.10.2(@grpc/grpc-js@1.13.4)(@types/react-dom@19.1.7(@types/react@19.1.9))(@types/react@19.1.9)(@wendellhu/redi@1.0.0(react@19.1.0))(react-dom@19.1.0(react@19.1.0))(react@19.1.0)(rxjs@7.8.2)
+      '@univerjs/preset-sheets-conditional-formatting':
+        specifier: ^0.10.2
+        version: 0.10.2(@grpc/grpc-js@1.13.4)(@types/react-dom@19.1.7(@types/react@19.1.9))(@types/react@19.1.9)(@wendellhu/redi@1.0.0(react@19.1.0))(react-dom@19.1.0(react@19.1.0))(react@19.1.0)(rxjs@7.8.2)
       '@univerjs/preset-sheets-core':
         specifier: ^0.10.2
         version: 0.10.2(@grpc/grpc-js@1.13.4)(@types/react-dom@19.1.7(@types/react@19.1.9))(@types/react@19.1.9)(@wendellhu/redi@1.0.0(react@19.1.0))(react-dom@19.1.0(react@19.1.0))(react@19.1.0)(rxjs@7.8.2)
@@ -51,6 +54,9 @@ importers:
         specifier: ^0.10.2
         version: 0.10.2(@grpc/grpc-js@1.13.4)(@types/react-dom@19.1.7(@types/react@19.1.9))(@types/react@19.1.9)(@wendellhu/redi@1.0.0(react@19.1.0))(react-dom@19.1.0(react@19.1.0))(react@19.1.0)(rxjs@7.8.2)
       '@univerjs/preset-sheets-filter':
+        specifier: ^0.10.2
+        version: 0.10.2(@grpc/grpc-js@1.13.4)(@types/react-dom@19.1.7(@types/react@19.1.9))(@types/react@19.1.9)(@wendellhu/redi@1.0.0(react@19.1.0))(react-dom@19.1.0(react@19.1.0))(react@19.1.0)(rxjs@7.8.2)
+      '@univerjs/preset-sheets-table':
         specifier: ^0.10.2
         version: 0.10.2(@grpc/grpc-js@1.13.4)(@types/react-dom@19.1.7(@types/react@19.1.9))(@types/react@19.1.9)(@wendellhu/redi@1.0.0(react@19.1.0))(react-dom@19.1.0(react@19.1.0))(react@19.1.0)(rxjs@7.8.2)
       '@univerjs/presets':

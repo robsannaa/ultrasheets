@@ -15,4 +15,3 @@ export function AppThemeProvider({ children }: { children: React.ReactNode }) {
     </NextThemesProvider>
   );
 }
-

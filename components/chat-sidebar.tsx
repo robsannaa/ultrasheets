@@ -73,8 +73,7 @@ function ChatMessages({
     return result;
   }, [messages]);
 
-  // Track assistant texts we've already rendered during this pass to avoid duplicates
-  const seenAssistantTexts = React.useRef<Set<string>>(new Set());
+  // Show all assistant text output without aggressive de-duplication
 
   return (
     <ScrollArea className="h-full px-1 py-4" ref={scrollAreaRef}>
@@ -101,55 +100,38 @@ function ChatMessages({
           if (message.role === "assistant" && !hasContent) return null;
 
           return (
-          <div
-            key={message.id}
-            className={cn(
-              "flex items-start gap-3",
-              message.role === "user" && "flex-row-reverse"
-            )}
-          >
-            <Avatar className="w-8 h-8">
-              <AvatarFallback>
-                {message.role === "user" ? "U" : "A"}
-              </AvatarFallback>
-            </Avatar>
             <div
+              key={message.id}
               className={cn(
-                  "max-w-[70%] rounded-lg p-3 text-sm",
-                message.role === "user"
-                    ? "bg-primary text-primary-foreground whitespace-pre-wrap"
-                  : "bg-muted"
+                "flex items-start gap-3",
+                message.role === "user" && "flex-row-reverse"
               )}
             >
+              <Avatar className="w-8 h-8">
+                <AvatarFallback>
+                  {message.role === "user" ? "U" : "A"}
+                </AvatarFallback>
+              </Avatar>
+              <div
+                className={cn(
+                  "max-w-full sm:max-w-[75%] rounded-lg p-3 text-sm break-words whitespace-pre-wrap",
+                  message.role === "user"
+                    ? "bg-primary text-primary-foreground"
+                    : "bg-muted"
+                )}
+              >
                 {message.parts ? (
                   <>
                     {(() => {
                       try {
-                        // Render only the final assistant text part (post-tool result),
-                        // instead of concatenating all text parts which can duplicate intent text.
-                        const lastTextPart = [...message.parts]
-                          .reverse()
-                          .find(
+                        const text = message.parts
+                          .filter(
                             (p: any) =>
                               p.type === "text" && typeof p.text === "string"
-                          );
-                        const text = lastTextPart?.text ?? "";
-                        // Deduplicate identical assistant texts within the same render pass
-                        const normalized = (text || "")
-                          .replace(/\s+/g, " ")
-                          .trim();
-                        const shouldHideText =
-                          message.role === "assistant" &&
-                          normalized.length > 0 &&
-                          seenAssistantTexts.current.has(normalized);
-                        if (
-                          message.role === "assistant" &&
-                          normalized.length > 0 &&
-                          !shouldHideText
-                        ) {
-                          seenAssistantTexts.current.add(normalized);
-                        }
-                        return text && !shouldHideText ? (
+                          )
+                          .map((p: any) => p.text)
+                          .join("");
+                        return text ? (
                           <CollapsibleMarkdown
                             key="assistant-text"
                             text={text}
@@ -160,75 +142,75 @@ function ChatMessages({
                       }
                     })()}
                     {message.parts.map((part: any, index: number) => {
-                    switch (part.type) {
-                      case "text":
+                      switch (part.type) {
+                        case "text":
                           return null; // already rendered once above
-                      case "tool-invocation": {
-                        const callId = part.toolInvocation.toolCallId;
-                        const toolName = part.toolInvocation.toolName;
-                        const state = part.toolInvocation.state;
-                        const args = part.toolInvocation.args;
+                        case "tool-invocation": {
+                          const callId = part.toolInvocation.toolCallId;
+                          const toolName = part.toolInvocation.toolName;
+                          const state = part.toolInvocation.state;
+                          const args = part.toolInvocation.args;
                           const label = describeTool(toolName, args);
 
-                        if (state === "call") {
+                          if (state === "call") {
                             if (toolName === "get_sheet_context") return null;
-                              return (
+                            return (
                               <ToolBadge
-                                  key={callId}
+                                key={callId}
                                 label={label}
                                 toolName={toolName}
                                 state="call"
                               />
                             );
-                        } else if (state === "result") {
-                          // Only show result for important operations, hide technical details
-                          const result = part.toolInvocation.result;
-                          if (toolName === "get_sheet_context") {
-                            return null; // Hide sheet context results - too technical
-                          }
+                          } else if (state === "result") {
+                            // Only show result for important operations, hide technical details
+                            const result = part.toolInvocation.result;
+                            if (toolName === "get_sheet_context") {
+                              return null; // Hide sheet context results - too technical
+                            }
 
-                          // Handle new error response format
-                          if (
-                            result &&
-                            typeof result === "object" &&
-                            result.error
-                          ) {
+                            // Handle new error response format
+                            if (
+                              result &&
+                              typeof result === "object" &&
+                              result.error
+                            ) {
+                              return (
+                                <div
+                                  key={callId}
+                                  className="text-red-600 text-sm"
+                                >
+                                  ⚠️ {result.message || result.error}
+                                </div>
+                              );
+                            }
                             return (
-                              <div
-                                key={callId}
-                                className="text-red-600 text-sm"
-                              >
-                                ⚠️ {result.message || result.error}
-                              </div>
-                            );
-                          }
-                          return (
                               <ToolBadge
-                              key={callId}
+                                key={callId}
                                 label={label}
                                 toolName={toolName}
                                 state="result"
                               />
-                          );
+                            );
+                          }
+                          return null;
                         }
-                        return null;
-                      }
-                      default:
+                        default:
                           // When parts exist, we do not render message.content fallback to avoid duplicates
-                        return null;
-                    }
+                          return null;
+                      }
                     })}
                   </>
                 ) : message.role === "assistant" ? (
-                  <div className="leading-6 prose prose-sm max-w-none dark:prose-invert">
+                  <div className="leading-6 prose prose-sm max-w-none dark:prose-invert break-words">
                     <ReactMarkdown remarkPlugins={[remarkGfm]}>
                       {message.content}
                     </ReactMarkdown>
-            </div>
+                  </div>
                 ) : (
                   message.content
                 )}
-          </div>
+              </div>
             </div>
           );
         })}
@@ -259,7 +241,13 @@ function ChatInput({
     }
   };
 
-  const handleFormSubmit = handleSubmit;
+  const handleFormSubmit = (e: React.FormEvent<HTMLFormElement>) => {
+    if (isLoading || !input.trim()) {
+      e.preventDefault();
+      return;
+    }
+    handleSubmit(e);
+  };
 
   return (
     <form onSubmit={handleFormSubmit} className="flex gap-2">
@@ -268,10 +256,15 @@ function ChatInput({
         value={input}
         onChange={handleInputChange}
         onKeyDown={handleKeyDown}
-        disabled={isLoading}
         className="flex-1"
       />
-      <Button type="submit" size="icon" disabled={isLoading || !input.trim()}>
+      <Button
+        type="submit"
+        size="icon"
+        disabled={isLoading || !input.trim()}
+        aria-busy={isLoading}
+        aria-disabled={isLoading || !input.trim()}
+      >
         {isLoading ? (
           <Loader2 className="h-4 w-4 animate-spin" />
         ) : (
@@ -289,10 +282,10 @@ function extractWorkbookData() {
       return null;
     const w: any = window as any;
     const univerAPI = w.univerAPI;
-      const workbook = univerAPI.getActiveWorkbook();
+    const workbook = univerAPI.getActiveWorkbook();
     if (!workbook || typeof workbook.save !== "function") return null;
 
-      const activeSheet = workbook.getActiveSheet();
+    const activeSheet = workbook.getActiveSheet();
     const activeSnapshot = activeSheet?.getSheet()?.getSnapshot();
     const activeName = activeSnapshot?.name;
 
@@ -357,12 +350,12 @@ function extractWorkbookData() {
           let hasData = false;
           for (let c = firstCol; c <= lastCol; c++) {
             const cell = rd[c];
-          if (
-            cell &&
-            cell.v !== undefined &&
-            cell.v !== null &&
-            cell.v !== ""
-          ) {
+            if (
+              cell &&
+              cell.v !== undefined &&
+              cell.v !== null &&
+              cell.v !== ""
+            ) {
               hasData = true;
               break;
             }
@@ -410,11 +403,24 @@ function extractWorkbookData() {
       const cellData = s?.cellData || {};
 
       let totalCells = 0;
+      let maxRowUsed = -1;
+      let maxColUsed = -1;
       for (const r in cellData) {
         for (const c in cellData[r]) {
           const cell = cellData[r][c];
           if (cell && cell.v !== undefined && cell.v !== null && cell.v !== "")
             totalCells++;
+          if (
+            cell &&
+            cell.v !== undefined &&
+            cell.v !== null &&
+            cell.v !== ""
+          ) {
+            const ri = parseInt(r, 10);
+            const ci = parseInt(c, 10);
+            if (ri > maxRowUsed) maxRowUsed = ri;
+            if (ci > maxColUsed) maxColUsed = ci;
+          }
         }
       }
 
@@ -422,11 +428,18 @@ function extractWorkbookData() {
       const primaryHeaders = tables[0]?.headers || [];
       const dataRows = tables[0]?.recordCount || 0;
 
+      // Compute used range like A1:D25 if any cell has data
+      const usedRange =
+        maxRowUsed >= 0 && maxColUsed >= 0
+          ? `A1:${String.fromCharCode(65 + maxColUsed)}${maxRowUsed + 1}`
+          : null;
+
       return {
         name,
         isActive: name === activeName,
         headers: primaryHeaders,
         structure: { totalCells, dataRows },
+        usedRange,
         tables,
       };
     });
@@ -443,7 +456,28 @@ function extractWorkbookData() {
 }
 
 export function ChatSidebar() {
-  const { messages, input, handleInputChange, handleSubmit, status, isLoading: aiLoading } = useChat({
+  const [mounted, setMounted] = React.useState(false);
+  React.useEffect(() => setMounted(true), []);
+  const getClientEnv = React.useCallback(() => {
+    try {
+      const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+      const locale = navigator.language;
+      // userAgentData is not available in all browsers
+      const platform =
+        (navigator as any).userAgentData?.platform || navigator.platform;
+      return { timeZone, locale, platform };
+    } catch {
+      return null;
+    }
+  }, []);
+  const {
+    messages,
+    input,
+    handleInputChange,
+    handleSubmit,
+    status,
+    isLoading: aiLoading,
+  } = useChat({
     api: "/api/chat",
     maxSteps: 5,
     initialMessages: [
@@ -457,6 +491,7 @@ export function ChatSidebar() {
     // Send workbook data with each request - this gets evaluated each time
     body: {
       workbookData: extractWorkbookData(),
+      clientEnv: mounted ? getClientEnv() : null,
     },
   });
 
@@ -469,28 +504,28 @@ export function ChatSidebar() {
       const lastMessage = messages[messages.length - 1];
       if (lastMessage?.role !== "assistant" || !lastMessage.parts) return;
 
-        for (const part of lastMessage.parts) {
-          if (
-            part.type === "tool-invocation" &&
-            part.toolInvocation.state === "result"
-          ) {
+      for (const part of lastMessage.parts) {
+        if (
+          part.type === "tool-invocation" &&
+          part.toolInvocation.state === "result"
+        ) {
           const callId: string | undefined = part.toolInvocation.toolCallId;
           // Deduplicate by toolCallId to prevent re-execution flicker
           if (callId && executedToolCallIdsRef.current.has(callId)) continue;
 
-            const result = part.toolInvocation.result;
+          const result = part.toolInvocation.result;
           if (!result || !result.clientSideAction) continue;
 
-              const action = result.clientSideAction;
-              try {
-                if (
-                  action.type === "executeUniverTool" &&
-                  window.executeUniverTool
-                ) {
+          const action = result.clientSideAction;
+          try {
+            if (
+              action.type === "executeUniverTool" &&
+              window.executeUniverTool
+            ) {
               const execResult = await window.executeUniverTool(
-                    action.toolName,
-                    action.params
-                  );
+                action.toolName,
+                action.params
+              );
               // Record recent action for richer LLM context
               try {
                 const w: any = window as any;
@@ -508,8 +543,8 @@ export function ChatSidebar() {
                 });
                 if (w.ultraActionLog.length > 50) w.ultraActionLog.shift();
               } catch {}
-                } else if (action.type === "formatCells") {
-                  await formatCells(action);
+            } else if (action.type === "formatCells") {
+              await formatCells(action);
               try {
                 const w: any = window as any;
                 w.ultraActionLog = w.ultraActionLog || [];
@@ -557,12 +592,203 @@ export function ChatSidebar() {
                 });
                 if (w.ultraActionLog.length > 50) w.ultraActionLog.shift();
               } catch {}
+            } else if (action.type === "setRangeValues") {
+              const w: any = window as any;
+              if (!(window as any).univerAPI)
+                throw new Error("Univer API not available");
+              const univerAPI = (window as any).univerAPI;
+              const workbook = univerAPI.getActiveWorkbook();
+              const worksheet = workbook.getActiveSheet();
+              const startCell: string = action.startCell;
+              const values: any[][] = action.values || [];
+              if (!Array.isArray(values) || values.length === 0)
+                throw new Error("No values provided");
+              const startColLetter = startCell.replace(/\d+/g, "");
+              const startRowNumber = parseInt(
+                startCell.replace(/\D+/g, ""),
+                10
+              );
+              const startColIndex = startColLetter.charCodeAt(0) - 65;
+              const startRowIndex = startRowNumber - 1;
+              const numRows = values.length;
+              const numCols = Math.max(
+                0,
+                ...values.map((r: any[]) => r.length)
+              );
+              const range = worksheet.getRange(
+                startRowIndex,
+                startColIndex,
+                numRows,
+                numCols
+              );
+              range.setValues(values);
+              try {
+                const formula = univerAPI.getFormula();
+                formula.executeCalculation();
+              } catch {}
+              try {
+                w.ultraActionLog = w.ultraActionLog || [];
+                w.ultraActionLog.push({
+                  at: new Date().toISOString(),
+                  tool: "bulk_set_values",
+                  params: action,
+                  result: "ok",
+                });
+                if (w.ultraActionLog.length > 50) w.ultraActionLog.shift();
+              } catch {}
+            } else if (action.type === "setRangeValuesByRange") {
+              const w: any = window as any;
+              if (!(window as any).univerAPI)
+                throw new Error("Univer API not available");
+              const univerAPI = (window as any).univerAPI;
+              const workbook = univerAPI.getActiveWorkbook();
+              const worksheet = workbook.getActiveSheet();
+              const rangeStr: string = action.range;
+              const values: any[][] = action.values || [];
+              if (!Array.isArray(values) || values.length === 0)
+                throw new Error("No values provided");
+              const range = worksheet.getRange(rangeStr);
+              range.setValues(values);
+              try {
+                const formula = univerAPI.getFormula();
+                formula.executeCalculation();
+              } catch {}
+              try {
+                w.ultraActionLog = w.ultraActionLog || [];
+                w.ultraActionLog.push({
+                  at: new Date().toISOString(),
+                  tool: "set_range_values",
+                  params: action,
+                  result: "ok",
+                });
+                if (w.ultraActionLog.length > 50) w.ultraActionLog.shift();
+              } catch {}
+            } else if (action.type === "clearRange") {
+              const w: any = window as any;
+              const univerAPI = (window as any).univerAPI;
+              if (!univerAPI) throw new Error("Univer API not available");
+              const worksheet = univerAPI.getActiveWorkbook().getActiveSheet();
+              worksheet.getRange(action.range).clear();
+              try {
+                w.ultraActionLog = w.ultraActionLog || [];
+                w.ultraActionLog.push({
+                  at: new Date().toISOString(),
+                  tool: "clear_range",
+                  params: action,
+                  result: "ok",
+                });
+                if (w.ultraActionLog.length > 50) w.ultraActionLog.shift();
+              } catch {}
+            } else if (action.type === "clearRangeContents") {
+              const w: any = window as any;
+              const univerAPI = (window as any).univerAPI;
+              if (!univerAPI) throw new Error("Univer API not available");
+              const worksheet = univerAPI.getActiveWorkbook().getActiveSheet();
+              worksheet.getRange(action.range).clearContents?.();
+              try {
+                w.ultraActionLog = w.ultraActionLog || [];
+                w.ultraActionLog.push({
+                  at: new Date().toISOString(),
+                  tool: "clear_range_contents",
+                  params: action,
+                  result: "ok",
+                });
+                if (w.ultraActionLog.length > 50) w.ultraActionLog.shift();
+              } catch {}
+            } else if (action.type === "moveRange") {
+              const w: any = window as any;
+              const univerAPI = (window as any).univerAPI;
+              if (!univerAPI) throw new Error("Univer API not available");
+              const worksheet = univerAPI.getActiveWorkbook().getActiveSheet();
+              const source = worksheet.getRange(action.sourceRange);
+              const values = source.getValues();
+              const destTopLeft = action.destStartCell;
+              const destColLetter = destTopLeft.replace(/\d+/g, "");
+              const destRowNumber = parseInt(
+                destTopLeft.replace(/\D+/g, ""),
+                10
+              );
+              const destColIndex = destColLetter.charCodeAt(0) - 65;
+              const destRowIndex = destRowNumber - 1;
+              const numRows = values.length;
+              const numCols = Math.max(
+                0,
+                ...values.map((r: any[]) => r.length)
+              );
+              const destRange = worksheet.getRange(
+                destRowIndex,
+                destColIndex,
+                numRows,
+                numCols
+              );
+              destRange.setValues(values);
+              if (action.clearSource) source.clear();
+              try {
+                const formula = univerAPI.getFormula();
+                formula.executeCalculation();
+              } catch {}
+              try {
+                w.ultraActionLog = w.ultraActionLog || [];
+                w.ultraActionLog.push({
+                  at: new Date().toISOString(),
+                  tool: "move_range",
+                  params: action,
+                  result: "ok",
+                });
+                if (w.ultraActionLog.length > 50) w.ultraActionLog.shift();
+              } catch {}
+            } else if (action.type === "transposeRange") {
+              const w: any = window as any;
+              const univerAPI = (window as any).univerAPI;
+              if (!univerAPI) throw new Error("Univer API not available");
+              const worksheet = univerAPI.getActiveWorkbook().getActiveSheet();
+              const source = worksheet.getRange(action.sourceRange);
+              const original = source.getValues();
+              const transposed: any[][] = original[0]
+                ? original[0].map((_: any, colIndex: number) =>
+                    original.map((row: any[]) => row[colIndex])
+                  )
+                : [];
+              const destTopLeft = action.destStartCell;
+              const destColLetter = destTopLeft.replace(/\d+/g, "");
+              const destRowNumber = parseInt(
+                destTopLeft.replace(/\D+/g, ""),
+                10
+              );
+              const destColIndex = destColLetter.charCodeAt(0) - 65;
+              const destRowIndex = destRowNumber - 1;
+              const numRows = transposed.length;
+              const numCols = Math.max(
+                0,
+                ...transposed.map((r: any[]) => r.length)
+              );
+              const destRange = worksheet.getRange(
+                destRowIndex,
+                destColIndex,
+                numRows,
+                numCols
+              );
+              destRange.setValues(transposed);
+              try {
+                const formula = univerAPI.getFormula();
+                formula.executeCalculation();
+              } catch {}
+              try {
+                w.ultraActionLog = w.ultraActionLog || [];
+                w.ultraActionLog.push({
+                  at: new Date().toISOString(),
+                  tool: "transpose_range",
+                  params: action,
+                  result: "ok",
+                });
+                if (w.ultraActionLog.length > 50) w.ultraActionLog.shift();
+              } catch {}
             }
 
             // Mark as executed only after successful run
             if (callId) executedToolCallIdsRef.current.add(callId);
-              } catch (error) {
-                console.error("Failed to execute client-side action:", error);
+          } catch (error) {
+            console.error("Failed to execute client-side action:", error);
             // Do not mark executed on failure to allow retry on next render
           }
         }
@@ -574,7 +800,7 @@ export function ChatSidebar() {
 
   // Format cells function
   const formatCells = async (action: any) => {
-        const univerAPI = (window as any).univerAPI;
+    const univerAPI = (window as any).univerAPI;
     await applyFormatting(univerAPI, action);
   };
 
@@ -593,7 +819,10 @@ export function ChatSidebar() {
       (typeof lastMsg?.content === "string" &&
         lastMsg.content.trim().length > 0));
 
-  const isLoading = aiLoading || status === "submitted" || (status === "streaming" && !assistantHasContent);
+  const isLoading =
+    aiLoading ||
+    status === "submitted" ||
+    (status === "streaming" && !assistantHasContent);
 
   return (
     <div className="h-full flex flex-col bg-background rounded-2xl my-2 mx-1 p-2">
@@ -603,8 +832,12 @@ export function ChatSidebar() {
         </div>
       </div>
 
-      <div className="flex-1 overflow-hidden">
-        <ChatMessages messages={messages} isLoading={isLoading} />
+      <div className="flex-1 overflow-hidden" suppressHydrationWarning>
+        {mounted ? (
+          <ChatMessages messages={messages} isLoading={isLoading} />
+        ) : (
+          <div className="h-full" />
+        )}
       </div>
 
       <div className="p-4 border-t">
@@ -612,7 +845,7 @@ export function ChatSidebar() {
           input={input}
           handleInputChange={handleInputChange}
           handleSubmit={handleSubmit}
-          isLoading={isLoading}
+          isLoading={mounted ? isLoading : true}
         />
       </div>
     </div>
@@ -644,8 +877,8 @@ function CollapsibleMarkdown({ text }: { text: string }) {
             <code
               className={cn(
                 inline
-                  ? "px-1 py-0.5 rounded bg-black/10"
-                  : "block p-3 rounded bg-black/10 overflow-x-auto"
+                  ? "px-1 py-0.5 rounded bg-muted"
+                  : "block p-3 rounded bg-muted overflow-x-auto"
               )}
               {...props}
             >
@@ -654,7 +887,7 @@ function CollapsibleMarkdown({ text }: { text: string }) {
           ),
           a: (props) => (
             <a
-              className="underline text-blue-600"
+              className="underline text-primary"
               target="_blank"
               rel="noreferrer"
               {...props}
@@ -667,7 +900,7 @@ function CollapsibleMarkdown({ text }: { text: string }) {
       {isLong && (
         <button
           type="button"
-          className="mt-1 text-[11px] underline text-blue-600"
+          className="mt-1 text-[11px] underline text-primary"
           onClick={() => setExpanded((v) => !v)}
         >
           {expanded ? "Show less" : "Show details"}
