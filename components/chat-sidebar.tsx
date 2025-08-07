@@ -353,7 +353,8 @@ function ChatInput({
 // Rich workbook context with multi-table detection and recent action log
 function extractWorkbookData() {
   try {
-    if (typeof window === "undefined" || !(window as any).univerAPI) return null;
+    if (typeof window === "undefined" || !(window as any).univerAPI)
+      return null;
     const w: any = window as any;
     const univerAPI = w.univerAPI;
     const workbook = univerAPI.getActiveWorkbook();
@@ -368,10 +369,17 @@ function extractWorkbookData() {
     const sheetsData: Record<string, any> = wbData.sheets || {};
 
     const detectTables = (cellData: any) => {
-      const tables: Array<{ range: string; headers: string[]; recordCount: number; numericColumns: string[] }> = [];
+      const tables: Array<{
+        range: string;
+        headers: string[];
+        recordCount: number;
+        numericColumns: string[];
+      }> = [];
       if (!cellData) return tables;
 
-      const rows = Object.keys(cellData).map((k) => parseInt(k, 10)).sort((a, b) => a - b);
+      const rows = Object.keys(cellData)
+        .map((k) => parseInt(k, 10))
+        .sort((a, b) => a - b);
       const maxRow = rows.length ? rows[rows.length - 1] : 0;
       let maxCol = 0;
       for (const r of rows) {
@@ -385,7 +393,8 @@ function extractWorkbookData() {
         let textRun = 0;
         for (let c = 0; c <= Math.min(maxCol, 30); c++) {
           const cell = rowData[c];
-          if (cell && typeof cell.v === "string" && cell.v.trim() && !cell.f) textRun++;
+          if (cell && typeof cell.v === "string" && cell.v.trim() && !cell.f)
+            textRun++;
           else if (textRun > 0) break;
         }
         if (textRun >= 2) headerCandidates.push(r);
@@ -405,12 +414,21 @@ function extractWorkbookData() {
         if (headers.length < 2) continue;
 
         let recordCount = 0;
-        for (let r = headerRow + 1; r <= Math.min(headerRow + 500, maxRow); r++) {
+        for (
+          let r = headerRow + 1;
+          r <= Math.min(headerRow + 500, maxRow);
+          r++
+        ) {
           const rd = cellData[r] || {};
           let hasData = false;
           for (let c = 0; c <= lastCol; c++) {
             const cell = rd[c];
-            if (cell && cell.v !== undefined && cell.v !== null && cell.v !== "") {
+            if (
+              cell &&
+              cell.v !== undefined &&
+              cell.v !== null &&
+              cell.v !== ""
+            ) {
               hasData = true;
               break;
             }
@@ -420,18 +438,29 @@ function extractWorkbookData() {
         }
 
         const endColLetter = String.fromCharCode(65 + Math.max(0, lastCol));
-        const range = `A${headerRow + 1}:${endColLetter}${headerRow + 1 + recordCount}`;
+        const range = `A${headerRow + 1}:${endColLetter}${
+          headerRow + 1 + recordCount
+        }`;
 
         const numericColumns: string[] = [];
         for (let c = 0; c <= lastCol; c++) {
           let numericHits = 0;
-          for (let r = headerRow + 1; r <= headerRow + 1 + Math.min(5, recordCount); r++) {
+          for (
+            let r = headerRow + 1;
+            r <= headerRow + 1 + Math.min(5, recordCount);
+            r++
+          ) {
             const cell = (cellData[r] || {})[c];
             if (!cell) continue;
             const v = cell.v;
-            if (typeof v === "number" || (typeof v === "string" && /^[£$€¥]?\s*[\d,.]+$/.test(v))) numericHits++;
+            if (
+              typeof v === "number" ||
+              (typeof v === "string" && /^[£$€¥]?\s*[\d,.]+$/.test(v))
+            )
+              numericHits++;
           }
-          if (numericHits >= 2) numericColumns.push(String.fromCharCode(65 + c));
+          if (numericHits >= 2)
+            numericColumns.push(String.fromCharCode(65 + c));
         }
 
         tables.push({ range, headers, recordCount, numericColumns });
@@ -449,7 +478,8 @@ function extractWorkbookData() {
       for (const r in cellData) {
         for (const c in cellData[r]) {
           const cell = cellData[r][c];
-          if (cell && cell.v !== undefined && cell.v !== null && cell.v !== "") totalCells++;
+          if (cell && cell.v !== undefined && cell.v !== null && cell.v !== "")
+            totalCells++;
         }
       }
 
@@ -535,7 +565,9 @@ export function ChatSidebar() {
                   tool: action.toolName,
                   params: action.params,
                   result:
-                    execResult && typeof execResult === "object" && execResult.message
+                    execResult &&
+                    typeof execResult === "object" &&
+                    execResult.message
                       ? execResult.message
                       : "ok",
                 });
@@ -549,6 +581,41 @@ export function ChatSidebar() {
                 w.ultraActionLog.push({
                   at: new Date().toISOString(),
                   tool: "format_cells",
+                  params: action,
+                  result: "ok",
+                });
+                if (w.ultraActionLog.length > 50) w.ultraActionLog.shift();
+              } catch {}
+            } else if (action.type === "setCellValue") {
+              // Direct cell value/formula set with formula recalculation
+              const w: any = window as any;
+              if (!(window as any).univerAPI) throw new Error("Univer API not available");
+              const univerAPI = (window as any).univerAPI;
+              const workbook = univerAPI.getActiveWorkbook();
+              const worksheet = workbook.getActiveSheet();
+              const cellRef: string = action.cell;
+              const isFormula: boolean = !!action.formula;
+              const value = action.value;
+              const colLetter = cellRef.replace(/\d+/g, "");
+              const rowNumber = parseInt(cellRef.replace(/\D+/g, ""), 10);
+              const colIndex = colLetter.charCodeAt(0) - 65;
+              const rowIndex = rowNumber - 1;
+              const range = worksheet.getRange(rowIndex, colIndex, 1, 1);
+              const finalValue = isFormula
+                ? String(value).startsWith("=")
+                  ? String(value)
+                  : `=${String(value)}`
+                : value;
+              range.setValue(finalValue);
+              try {
+                const formula = univerAPI.getFormula();
+                formula.executeCalculation();
+              } catch {}
+              try {
+                w.ultraActionLog = w.ultraActionLog || [];
+                w.ultraActionLog.push({
+                  at: new Date().toISOString(),
+                  tool: "set_cell_value",
                   params: action,
                   result: "ok",
                 });
