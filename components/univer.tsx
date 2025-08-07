@@ -38,6 +38,21 @@ export function Univer() {
       const { UniverSheetsConditionalFormattingPreset } = await import(
         "@univerjs/preset-sheets-conditional-formatting"
       );
+      // Table preset (optional; fall back if missing)
+      let TablePreset: any = null;
+      let tableLocales: any = null;
+      try {
+        const tablePresetMod = await import("@univerjs/preset-sheets-table");
+        const tableLocaleMod = await import(
+          "@univerjs/preset-sheets-table/locales/en-US"
+        );
+        TablePreset = tablePresetMod.UniverSheetsTablePreset;
+        tableLocales = tableLocaleMod.default;
+        // Optional CSS imports are safe in dev; skip if bundler lacks it
+        // Skip CSS import to avoid type resolution issues in certain builds
+      } catch (e) {
+        console.warn("⚠️ Table preset unavailable, continuing without it.", e);
+      }
       // Use CalculationMode from sheets-formula to align with facade API
       const { CalculationMode } = await import("@univerjs/sheets-formula");
       const sheetsCoreEnUS = await import(
@@ -115,6 +130,9 @@ export function Univer() {
       if (filterPreset) {
         presets.push(filterPreset());
       }
+      if (TablePreset) {
+        presets.push(TablePreset());
+      }
 
       let locales = mergeLocales(sheetsCoreEnUS);
       try {
@@ -124,13 +142,15 @@ export function Univer() {
               sheetsDrawingEnUS,
               sheetsAdvancedEnUS,
               sheetsCFEnUS,
-              filterLocales
+              filterLocales,
+              tableLocales || {}
             )
           : mergeLocales(
               sheetsCoreEnUS,
               sheetsDrawingEnUS,
               sheetsAdvancedEnUS,
-              sheetsCFEnUS
+              sheetsCFEnUS,
+              tableLocales || {}
             );
       } catch (e) {
         console.warn(
@@ -138,8 +158,8 @@ export function Univer() {
           e
         );
         locales = filterLocales
-          ? mergeLocales(sheetsCoreEnUS, filterLocales)
-          : mergeLocales(sheetsCoreEnUS);
+          ? mergeLocales(sheetsCoreEnUS, filterLocales, tableLocales || {})
+          : mergeLocales(sheetsCoreEnUS, tableLocales || {});
       }
 
       // If already initialized (HMR / re-render), reuse existing API
@@ -245,6 +265,7 @@ export function Univer() {
           execute_conditional_formatting: executeConditionalFormatting,
           execute_auto_fit_columns: executeAutoFitColumns,
           execute_find_cell: executeFindCell,
+        execute_format_as_table: executeFormatAsTable,
         };
         (window as any).__ultraToolFns = __toolFns;
         window.executeUniverTool = async (toolName: string, params?: any) => {
@@ -423,9 +444,17 @@ export function Univer() {
             for (const r of ranges) {
               // Payload shape can differ across versions; try a few common shapes
               const payloads = [
-                { unitId, subUnitId: sheetId, col: { start: r.start, end: r.end } },
+                {
+                  unitId,
+                  subUnitId: sheetId,
+                  col: { start: r.start, end: r.end },
+                },
                 { unitId, sheetId, col: { start: r.start, end: r.end } },
-                { unitId, worksheetId: sheetId, range: { start: r.start, end: r.end } },
+                {
+                  unitId,
+                  worksheetId: sheetId,
+                  range: { start: r.start, end: r.end },
+                },
               ];
               let ok = false;
               for (const p of payloads) {
@@ -549,6 +578,32 @@ export function Univer() {
           }
         }
         return { success: false, message: "Not found" };
+      };
+
+      const executeFormatAsTable = async (params: any) => {
+        if (!univerAPI) throw new Error("Univer API not available");
+        const fWorkbook: any = univerAPI.getActiveWorkbook();
+        const fWorksheet: any = fWorkbook.getActiveSheet();
+        const { range, name, tableId, showHeader = true, theme } = params || {};
+        const fRange = fWorksheet.getRange(range);
+        const id = tableId || `tbl_${Date.now().toString(36)}`;
+        const tName = name || id;
+
+        const ok = await fWorksheet.addTable(
+          tName,
+          fRange.getRange(),
+          id,
+          { showHeader }
+        );
+        if (!ok) return { success: false, message: "Failed to add table" };
+
+        if (theme && typeof fWorksheet.addTableTheme === "function") {
+          try {
+            await fWorksheet.addTableTheme(id, { name: theme });
+          } catch {}
+        }
+
+        return { success: true, message: `Table ${tName} created`, id, name: tName };
       };
       const executeListColumns = async () => {
         if (!univerAPI) {

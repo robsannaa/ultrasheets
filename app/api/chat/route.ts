@@ -798,10 +798,7 @@ Be professional, execute requests immediately, and provide specific insights bas
           parameters: z.object({
             text: z.string().describe("Text to match in cell value"),
             sheetName: z.string().optional(),
-            match: z
-              .enum(["exact", "contains"]) 
-              .optional()
-              .default("exact"),
+            match: z.enum(["exact", "contains"]).optional().default("exact"),
             column: z
               .string()
               .optional()
@@ -814,6 +811,38 @@ Be professional, execute requests immediately, and provide specific insights bas
                 type: "executeUniverTool",
                 toolName: "find_cell",
                 params: { text, sheetName, match, column },
+              },
+            };
+          },
+        }),
+
+        format_as_table: tool({
+          description:
+            "Format a given A1 range as a Univer Table with optional name and theme.",
+          parameters: z.object({
+            range: z
+              .string()
+              .describe("A1 range to convert to a table, e.g., B2:F11"),
+            name: z.string().optional().describe("Optional table name"),
+            tableId: z
+              .string()
+              .optional()
+              .describe("Optional table id; will be generated if omitted"),
+            showHeader: z.boolean().optional().default(true),
+            theme: z
+              .string()
+              .optional()
+              .describe(
+                "Optional theme name (must exist). If omitted, default theme is used."
+              ),
+          }),
+          execute: async ({ range, name, tableId, showHeader = true, theme }) => {
+            return {
+              message: `Formatting ${range} as table...`,
+              clientSideAction: {
+                type: "executeUniverTool",
+                toolName: "format_as_table",
+                params: { range, name, tableId, showHeader, theme },
               },
             };
           },

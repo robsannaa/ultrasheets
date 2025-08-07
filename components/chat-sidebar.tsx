@@ -713,6 +713,8 @@ function describeTool(toolName: string, args: any): string {
       return `Set formula`;
     case "find_cell":
       return "Find cell";
+    case "format_as_table":
+      return `Format as table`;
     case "ask_for_range":
       return "Need range specification";
     case "get_sheet_context":
