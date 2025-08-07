@@ -243,7 +243,8 @@ export function Univer() {
           execute_switch_sheet: executeSwitchSheet,
           execute_add_filter: executeAddFilter,
           execute_conditional_formatting: executeConditionalFormatting,
-        execute_auto_fit_columns: executeAutoFitColumns,
+          execute_auto_fit_columns: executeAutoFitColumns,
+        execute_find_cell: executeFindCell,
         };
         (window as any).__ultraToolFns = __toolFns;
         window.executeUniverTool = async (toolName: string, params?: any) => {
@@ -372,7 +373,10 @@ export function Univer() {
 
         const parseColumns = (spec: string): number[] => {
           const cols: number[] = [];
-          const parts = spec.split(",").map((s) => s.trim()).filter(Boolean);
+          const parts = spec
+            .split(",")
+            .map((s) => s.trim())
+            .filter(Boolean);
           for (const p of parts) {
             if (/^[A-Za-z]+:[A-Za-z]+$/.test(p)) {
               const [a, b] = p.split(":");
@@ -396,7 +400,8 @@ export function Univer() {
         const maxRow = Math.min(rowsSampleLimit, snapshot?.rowCount || 10000);
 
         // Rough width heuristic: use header + top N rows text length, convert to px
-        const toPx = (len: number) => Math.min(600, Math.max(40, Math.round(len * 7.2 + 16))); // 7.2px/char + padding
+        const toPx = (len: number) =>
+          Math.min(600, Math.max(40, Math.round(len * 7.2 + 16))); // 7.2px/char + padding
 
         for (const col of colIndexes) {
           let maxChars = 0;
@@ -432,6 +437,45 @@ export function Univer() {
           message: `Auto-fitted columns ${columns}`,
           columns: colIndexes,
         };
+      };
+
+      const executeFindCell = async (params: any) => {
+        if (!univerAPI) throw new Error("Univer API not available");
+        const { text, sheetName, match = "exact", column } = params || {};
+        const fWorkbook: any = univerAPI.getActiveWorkbook();
+        if (!fWorkbook) throw new Error("No active workbook available");
+        const fWorksheet: any = sheetName
+          ? fWorkbook.getSheets().find((s: any) => s.getName?.() === sheetName) || fWorkbook.getActiveSheet()
+          : fWorkbook.getActiveSheet();
+
+        const snap = fWorksheet.getSheet().getSnapshot();
+        const data = snap?.cellData || {};
+        const colIndexFilter = column
+          ? column.toUpperCase().charCodeAt(0) - 65
+          : undefined;
+
+        for (const rKey of Object.keys(data)) {
+          const r = Number(rKey);
+          const row = data[r] || {};
+          const cKeys = Object.keys(row);
+          for (const cKey of cKeys) {
+            const c = Number(cKey);
+            if (
+              typeof colIndexFilter === "number" &&
+              c !== colIndexFilter
+            )
+              continue;
+            const v = row[c]?.v;
+            if (v == null) continue;
+            const s = String(v);
+            const ok = match === "contains" ? s.includes(text) : s === text;
+            if (ok) {
+              const addr = `${String.fromCharCode(65 + c)}${r + 1}`;
+              return { success: true, address: addr, sheet: fWorksheet.getName?.() };
+            }
+          }
+        }
+        return { success: false, message: "Not found" };
       };
       const executeListColumns = async () => {
         if (!univerAPI) {

@@ -752,7 +752,9 @@ Be professional, execute requests immediately, and provide specific insights bas
               .number()
               .optional()
               .default(1000)
-              .describe("Max rows to sample for measuring content (default 1000)"),
+              .describe(
+                "Max rows to sample for measuring content (default 1000)"
+              ),
           }),
           execute: async ({ columns, rowsSampleLimit = 1000 }) => {
             return {
@@ -761,6 +763,57 @@ Be professional, execute requests immediately, and provide specific insights bas
                 type: "executeUniverTool",
                 toolName: "auto_fit_columns",
                 params: { columns, rowsSampleLimit },
+              },
+            };
+          },
+        }),
+
+        set_cell_formula: tool({
+          description:
+            "Set an A1-style formula into a specific cell. Prefer this over writing computed constants.",
+          parameters: z.object({
+            cell: z.string().describe("Target cell in A1 notation, e.g., E3"),
+            formula: z
+              .string()
+              .describe(
+                "Formula string in A1 notation, without or with leading = (both accepted)"
+              ),
+          }),
+          execute: async ({ cell, formula }) => {
+            return {
+              message: `Setting formula in ${cell}`,
+              clientSideAction: {
+                type: "setCellValue",
+                cell,
+                value: formula,
+                formula: true,
+              },
+            };
+          },
+        }),
+
+        find_cell: tool({
+          description:
+            "Find the first cell that matches a given text, optionally within a sheet or column. Returns the cell address for building formulas.",
+          parameters: z.object({
+            text: z.string().describe("Text to match in cell value"),
+            sheetName: z.string().optional(),
+            match: z
+              .enum(["exact", "contains"]) 
+              .optional()
+              .default("exact"),
+            column: z
+              .string()
+              .optional()
+              .describe("Optional column letter to restrict search, e.g., 'A'"),
+          }),
+          execute: async ({ text, sheetName, match = "exact", column }) => {
+            return {
+              message: `Locating cell for "${text}"...`,
+              clientSideAction: {
+                type: "executeUniverTool",
+                toolName: "find_cell",
+                params: { text, sheetName, match, column },
               },
             };
           },
