@@ -1,5 +1,9 @@
 # TODO: LLM Spreadsheet Integration Implementation Guide
 
+## 🎥 Demo
+
+Watch the UltraSheets demo: [https://drive.google.com/file/d/16uO7e7AuWmeSh9OQ8DlWah7CaIVQvv1N/view?usp=sharing](https://drive.google.com/file/d/16uO7e7AuWmeSh9OQ8DlWah7CaIVQvv1N/view?usp=sharing)
+
 This folder contains comprehensive implementation tasks for completing the LLM-powered spreadsheet integration according to the technical specification.
 
 ## 📋 Task Overview
