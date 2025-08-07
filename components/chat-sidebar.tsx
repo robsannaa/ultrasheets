@@ -21,12 +21,6 @@ function ChatMessages({
   isLoading: boolean;
 }) {
   const scrollAreaRef = useRef<HTMLDivElement>(null);
-  const [isHydrated, setIsHydrated] = React.useState(false);
-
-  // Avoid SSR/CSR markup mismatch by rendering message list only after hydration
-  useEffect(() => {
-    setIsHydrated(true);
-  }, []);
 
   useEffect(() => {
     if (scrollAreaRef.current) {
@@ -82,15 +76,6 @@ function ChatMessages({
   // Track assistant texts we've already rendered during this pass to avoid duplicates
   const seenAssistantTexts = React.useRef<Set<string>>(new Set());
 
-  // During SSR, render an empty container to keep markup stable
-  if (!isHydrated) {
-    return (
-      <ScrollArea className="h-full px-1 py-4" ref={scrollAreaRef}>
-        <div className="space-y-4" />
-      </ScrollArea>
-    );
-  }
-
   return (
     <ScrollArea className="h-full px-1 py-4" ref={scrollAreaRef}>
       <div className="space-y-4">
@@ -99,14 +84,18 @@ function ChatMessages({
           const hasParts = Array.isArray(message.parts);
           const hasTextPart = hasParts
             ? message.parts.some(
-                (p: any) => p.type === "text" && typeof p.text === "string" && p.text.trim().length > 0
+                (p: any) =>
+                  p.type === "text" &&
+                  typeof p.text === "string" &&
+                  p.text.trim().length > 0
               )
             : false;
           const hasToolPart = hasParts
             ? message.parts.some((p: any) => p.type === "tool-invocation")
             : false;
           const hasContent =
-            (typeof message.content === "string" && message.content.trim().length > 0) ||
+            (typeof message.content === "string" &&
+              message.content.trim().length > 0) ||
             hasTextPart ||
             hasToolPart;
           if (message.role === "assistant" && !hasContent) return null;
@@ -126,68 +115,71 @@ function ChatMessages({
             </Avatar>
             <div
               className={cn(
-                "max-w-[70%] rounded-lg p-3 text-sm",
+                  "max-w-[70%] rounded-lg p-3 text-sm",
                 message.role === "user"
-                  ? "bg-primary text-primary-foreground whitespace-pre-wrap"
+                    ? "bg-primary text-primary-foreground whitespace-pre-wrap"
                   : "bg-muted"
               )}
             >
-              {message.parts ? (
-                <>
-                  {(() => {
-                    try {
-                      // Render only the final assistant text part (post-tool result),
-                      // instead of concatenating all text parts which can duplicate intent text.
-                      const lastTextPart = [...message.parts]
-                        .reverse()
-                        .find(
-                          (p: any) =>
-                            p.type === "text" && typeof p.text === "string"
-                        );
-                      const text = lastTextPart?.text ?? "";
-                      // Deduplicate identical assistant texts within the same render pass
-                      const normalized = (text || "")
-                        .replace(/\s+/g, " ")
-                        .trim();
-                      const shouldHideText =
-                        message.role === "assistant" &&
-                        normalized.length > 0 &&
-                        seenAssistantTexts.current.has(normalized);
-                      if (
-                        message.role === "assistant" &&
-                        normalized.length > 0 &&
-                        !shouldHideText
-                      ) {
-                        seenAssistantTexts.current.add(normalized);
+                {message.parts ? (
+                  <>
+                    {(() => {
+                      try {
+                        // Render only the final assistant text part (post-tool result),
+                        // instead of concatenating all text parts which can duplicate intent text.
+                        const lastTextPart = [...message.parts]
+                          .reverse()
+                          .find(
+                            (p: any) =>
+                              p.type === "text" && typeof p.text === "string"
+                          );
+                        const text = lastTextPart?.text ?? "";
+                        // Deduplicate identical assistant texts within the same render pass
+                        const normalized = (text || "")
+                          .replace(/\s+/g, " ")
+                          .trim();
+                        const shouldHideText =
+                          message.role === "assistant" &&
+                          normalized.length > 0 &&
+                          seenAssistantTexts.current.has(normalized);
+                        if (
+                          message.role === "assistant" &&
+                          normalized.length > 0 &&
+                          !shouldHideText
+                        ) {
+                          seenAssistantTexts.current.add(normalized);
+                        }
+                        return text && !shouldHideText ? (
+                          <CollapsibleMarkdown
+                            key="assistant-text"
+                            text={text}
+                          />
+                        ) : null;
+                      } catch {
+                        return null;
                       }
-                      return text && !shouldHideText ? (
-                        <CollapsibleMarkdown key="assistant-text" text={text} />
-                      ) : null;
-                    } catch {
-                      return null;
-                    }
-                  })()}
-                  {message.parts.map((part: any, index: number) => {
+                    })()}
+                    {message.parts.map((part: any, index: number) => {
                     switch (part.type) {
                       case "text":
-                        return null; // already rendered once above
+                          return null; // already rendered once above
                       case "tool-invocation": {
                         const callId = part.toolInvocation.toolCallId;
                         const toolName = part.toolInvocation.toolName;
                         const state = part.toolInvocation.state;
                         const args = part.toolInvocation.args;
-                        const label = describeTool(toolName, args);
+                          const label = describeTool(toolName, args);
 
                         if (state === "call") {
-                          if (toolName === "get_sheet_context") return null;
+                            if (toolName === "get_sheet_context") return null;
                               return (
-                            <ToolBadge
+                              <ToolBadge
                                   key={callId}
-                              label={label}
-                              toolName={toolName}
-                              state="call"
-                            />
-                          );
+                                label={label}
+                                toolName={toolName}
+                                state="call"
+                              />
+                            );
                         } else if (state === "result") {
                           // Only show result for important operations, hide technical details
                           const result = part.toolInvocation.result;
@@ -211,33 +203,33 @@ function ChatMessages({
                             );
                           }
                           return (
-                            <ToolBadge
+                              <ToolBadge
                               key={callId}
-                              label={label}
-                              toolName={toolName}
-                              state="result"
-                            />
+                                label={label}
+                                toolName={toolName}
+                                state="result"
+                              />
                           );
                         }
                         return null;
                       }
                       default:
-                        // When parts exist, we do not render message.content fallback to avoid duplicates
+                          // When parts exist, we do not render message.content fallback to avoid duplicates
                         return null;
                     }
-                  })}
-                </>
-              ) : message.role === "assistant" ? (
-                <div className="leading-6 prose prose-sm max-w-none dark:prose-invert">
-                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                    {message.content}
-                  </ReactMarkdown>
+                    })}
+                  </>
+                ) : message.role === "assistant" ? (
+                  <div className="leading-6 prose prose-sm max-w-none dark:prose-invert">
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                      {message.content}
+                    </ReactMarkdown>
             </div>
-              ) : (
-                message.content
-              )}
-            </div>
+                ) : (
+                  message.content
+                )}
           </div>
+            </div>
           );
         })}
         {/* Typing indicator removed: the send button already shows progress */}
@@ -451,7 +443,7 @@ function extractWorkbookData() {
 }
 
 export function ChatSidebar() {
-  const { messages, input, handleInputChange, handleSubmit, status } = useChat({
+  const { messages, input, handleInputChange, handleSubmit, status, isLoading: aiLoading } = useChat({
     api: "/api/chat",
     maxSteps: 5,
     initialMessages: [
@@ -601,8 +593,7 @@ export function ChatSidebar() {
       (typeof lastMsg?.content === "string" &&
         lastMsg.content.trim().length > 0));
 
-  const isLoading =
-    status === "submitted" || (status === "streaming" && !assistantHasContent);
+  const isLoading = aiLoading || status === "submitted" || (status === "streaming" && !assistantHasContent);
 
   return (
     <div className="h-full flex flex-col bg-background rounded-2xl my-2 mx-1 p-2">
