@@ -75,28 +75,56 @@ export function Univer() {
         );
       }
 
-      const presets = [
-        UniverSheetsCorePreset({
+      const corePreset = UniverSheetsCorePreset({
           container: containerRef.current,
           // Ensure formulas compute deterministically on load
           formula: {
             initialFormulaComputing: CalculationMode.FORCED,
           },
-        }),
-        // Required for charts
-        UniverSheetsDrawingPreset(),
-        // Includes charts and other advanced features
-        UniverSheetsAdvancedPreset(),
-      ];
+        });
+
+      // Build presets in a way that allows graceful fallback if advanced/drawing cause injector errors
+      let presets: any[] = [corePreset];
+      try {
+        // Try to include chart-related presets
+        presets = [
+          corePreset,
+          UniverSheetsDrawingPreset(),
+          UniverSheetsAdvancedPreset(),
+        ];
+      } catch (e) {
+        console.warn("⚠️ Failed to prepare chart presets; continuing with core only.", e);
+        presets = [corePreset];
+      }
 
       // Add filter preset if available
       if (filterPreset) {
         presets.push(filterPreset());
       }
 
-      const locales = filterLocales
-        ? mergeLocales(sheetsCoreEnUS, sheetsDrawingEnUS, sheetsAdvancedEnUS, filterLocales)
-        : mergeLocales(sheetsCoreEnUS, sheetsDrawingEnUS, sheetsAdvancedEnUS);
+      let locales = mergeLocales(sheetsCoreEnUS);
+      try {
+        locales = filterLocales
+          ? mergeLocales(
+              sheetsCoreEnUS,
+              sheetsDrawingEnUS,
+              sheetsAdvancedEnUS,
+              filterLocales
+            )
+          : mergeLocales(
+              sheetsCoreEnUS,
+              sheetsDrawingEnUS,
+              sheetsAdvancedEnUS
+            );
+      } catch (e) {
+        console.warn(
+          "⚠️ Failed to merge locales for chart presets; using core locales only.",
+          e
+        );
+        locales = filterLocales
+          ? mergeLocales(sheetsCoreEnUS, filterLocales)
+          : mergeLocales(sheetsCoreEnUS);
+      }
 
       // If already initialized (HMR / re-render), reuse existing API
       if (
@@ -975,8 +1003,11 @@ export function Univer() {
             const chartTypeEnum = enumMap[chart_type] ?? enumType.Column;
 
             // Convert position like "H2" to row/col anchors (0-based)
-            const posCol = (chartPosition.match(/[A-Z]+/i)?.[0] || "H").toUpperCase();
-            const posRowNum = parseInt(chartPosition.replace(/\D+/g, ""), 10) || 2;
+            const posCol = (
+              chartPosition.match(/[A-Z]+/i)?.[0] || "H"
+            ).toUpperCase();
+            const posRowNum =
+              parseInt(chartPosition.replace(/\D+/g, ""), 10) || 2;
             const anchorRow = posRowNum - 1;
             const anchorCol = posCol.charCodeAt(0) - 65;
 
@@ -995,7 +1026,10 @@ export function Univer() {
             const chartInfo = builder.build();
             await fWorksheet.insertChart(chartInfo);
           } catch (chartError) {
-            console.warn("⚠️ Native chart insertion failed, falling back.", chartError);
+            console.warn(
+              "⚠️ Native chart insertion failed, falling back.",
+              chartError
+            );
             await createImprovedChart(
               worksheet,
               finalDataRange,
