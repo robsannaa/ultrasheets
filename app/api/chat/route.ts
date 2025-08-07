@@ -309,7 +309,9 @@ Be professional, execute requests immediately, and provide specific insights bas
             sheetName: z
               .string()
               .optional()
-              .describe("Optional sheet name to create/use for the pivot table"),
+              .describe(
+                "Optional sheet name to create/use for the pivot table"
+              ),
             data_range: z
               .string()
               .optional()
@@ -595,6 +597,60 @@ Be professional, execute requests immediately, and provide specific insights bas
                 success: false,
               };
             }
+          },
+        }),
+
+        conditional_formatting: tool({
+          description:
+            "Add conditional formatting rules (e.g., negatives red, values between X and Y, text contains)",
+          parameters: z.object({
+            range: z
+              .string()
+              .describe("Range to apply (e.g., 'A2:A100' or 'B:B')"),
+            ruleType: z
+              .enum([
+                "number_between",
+                "number_gt",
+                "number_gte",
+                "number_lt",
+                "number_lte",
+                "number_eq",
+                "number_neq",
+                "text_contains",
+                "text_not_contains",
+                "text_starts_with",
+                "text_ends_with",
+                "not_empty",
+                "empty",
+                "formula",
+                "color_scale",
+                "data_bar",
+                "unique",
+                "duplicate",
+              ])
+              .optional()
+              .describe("Type of rule. Defaults to negative values red (number_lt 0)"),
+            min: z.number().optional(),
+            max: z.number().optional(),
+            equals: z.number().optional(),
+            contains: z.string().optional(),
+            startsWith: z.string().optional(),
+            endsWith: z.string().optional(),
+            formula: z.string().optional(),
+            background: z.string().optional().describe("Background color (e.g., '#FF0000')"),
+            fontColor: z.string().optional().describe("Font color (e.g., '#00FF00')"),
+            bold: z.boolean().optional(),
+            italic: z.boolean().optional(),
+          }),
+          execute: async (params) => {
+            return {
+              message: `Applying conditional formatting to ${params.range}...`,
+              clientSideAction: {
+                type: "executeUniverTool",
+                toolName: "conditional_formatting",
+                params,
+              },
+            };
           },
         }),
 

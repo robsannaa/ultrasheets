@@ -1086,6 +1086,8 @@ function describeTool(toolName: string, args: any): string {
       return `Analyze: ${String(args?.user_request ?? "")}`;
     case "add_filter":
       return "Apply filter";
+    case "conditional_formatting":
+      return "Conditional formatting";
     case "ask_for_range":
       return "Need range specification";
     case "get_sheet_context":

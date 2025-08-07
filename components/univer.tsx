@@ -5,9 +5,9 @@ import { useTheme } from "next-themes";
 import "@univerjs/preset-sheets-core/lib/index.css";
 import "@univerjs/preset-sheets-drawing/lib/index.css";
 import "@univerjs/preset-sheets-advanced/lib/index.css";
+import "@univerjs/preset-sheets-conditional-formatting/lib/index.css";
 // Enable formula facade API (VLOOKUP/INDEX/MATCH and 500+ functions)
 import "@univerjs/sheets-formula/facade";
-import { greenTheme } from "@univerjs/themes";
 // Global tool execution handler
 declare global {
   interface Window {
@@ -35,6 +35,9 @@ export function Univer() {
       const { UniverSheetsAdvancedPreset } = await import(
         "@univerjs/preset-sheets-advanced"
       );
+      const { UniverSheetsConditionalFormattingPreset } = await import(
+        "@univerjs/preset-sheets-conditional-formatting"
+      );
       // Use CalculationMode from sheets-formula to align with facade API
       const { CalculationMode } = await import("@univerjs/sheets-formula");
       const sheetsCoreEnUS = await import(
@@ -46,9 +49,16 @@ export function Univer() {
       const sheetsAdvancedEnUS = await import(
         "@univerjs/preset-sheets-advanced/locales/en-US"
       ).then((m) => m.default);
-      const { createUniver, LocaleType, mergeLocales, defaultTheme, greenTheme } = await import(
-        "@univerjs/presets"
-      );
+      const sheetsCFEnUS = await import(
+        "@univerjs/preset-sheets-conditional-formatting/locales/en-US"
+      ).then((m) => m.default);
+      const {
+        createUniver,
+        LocaleType,
+        mergeLocales,
+        defaultTheme,
+        greenTheme,
+      } = await import("@univerjs/presets");
       const { LifecycleStages } = await import("@univerjs/core");
 
       // Note: Advanced and drawing presets cause dependency conflicts, keeping simple for now
@@ -91,6 +101,7 @@ export function Univer() {
           corePreset,
           UniverSheetsDrawingPreset(),
           UniverSheetsAdvancedPreset(),
+          UniverSheetsConditionalFormattingPreset(),
         ];
       } catch (e) {
         console.warn(
@@ -112,9 +123,15 @@ export function Univer() {
               sheetsCoreEnUS,
               sheetsDrawingEnUS,
               sheetsAdvancedEnUS,
+              sheetsCFEnUS,
               filterLocales
             )
-          : mergeLocales(sheetsCoreEnUS, sheetsDrawingEnUS, sheetsAdvancedEnUS);
+          : mergeLocales(
+              sheetsCoreEnUS,
+              sheetsDrawingEnUS,
+              sheetsAdvancedEnUS,
+              sheetsCFEnUS
+            );
       } catch (e) {
         console.warn(
           "⚠️ Failed to merge locales for chart presets; using core locales only.",
@@ -151,6 +168,8 @@ export function Univer() {
                 return await executeSwitchSheet(params);
               case "add_filter":
                 return await executeAddFilter(params);
+              case "conditional_formatting":
+                return await executeConditionalFormatting(params);
               default:
                 throw new Error(`Unknown tool: ${toolName}`);
             }
@@ -233,6 +252,8 @@ export function Univer() {
               return await executeSwitchSheet(params);
             case "add_filter":
               return await executeAddFilter(params);
+            case "conditional_formatting":
+              return await executeConditionalFormatting(params);
             default:
               throw new Error(`Unknown tool: ${toolName}`);
           }
@@ -243,6 +264,112 @@ export function Univer() {
       };
 
       // Tool execution functions
+      const executeConditionalFormatting = async (params: any) => {
+        if (!univerAPI) throw new Error("Univer API not available");
+        const fWorkbook: any = univerAPI.getActiveWorkbook();
+        if (!fWorkbook) throw new Error("No active workbook available");
+        const fWorksheet: any = fWorkbook.getActiveSheet();
+
+        const {
+          range = "A1:A100",
+          ruleType,
+          // Numeric comparisons
+          min,
+          max,
+          equals,
+          // Text comparisons
+          contains,
+          startsWith,
+          endsWith,
+          // Formula
+          formula,
+          // Style
+          background,
+          fontColor,
+          bold,
+          italic,
+        } = params || {};
+
+        const fRange = fWorksheet.getRange(range);
+        const builder = fWorksheet.newConditionalFormattingRule();
+
+        // Choose condition
+        switch (ruleType) {
+          case "number_between":
+            builder.whenNumberBetween(min, max);
+            break;
+          case "number_gt":
+            builder.whenNumberGreaterThan(min);
+            break;
+          case "number_gte":
+            builder.whenNumberGreaterThanOrEqualTo(min);
+            break;
+          case "number_lt":
+            builder.whenNumberLessThan(max);
+            break;
+          case "number_lte":
+            builder.whenNumberLessThanOrEqualTo(max);
+            break;
+          case "number_eq":
+            builder.whenNumberEqualTo(equals);
+            break;
+          case "number_neq":
+            builder.whenNumberNotEqualTo(equals);
+            break;
+          case "text_contains":
+            builder.whenTextContains(contains);
+            break;
+          case "text_not_contains":
+            builder.whenTextDoesNotContain(contains);
+            break;
+          case "text_starts_with":
+            builder.whenTextStartsWith(startsWith);
+            break;
+          case "text_ends_with":
+            builder.whenTextEndsWith(endsWith);
+            break;
+          case "not_empty":
+            builder.whenCellNotEmpty();
+            break;
+          case "empty":
+            builder.whenCellEmpty();
+            break;
+          case "formula":
+            if (formula) builder.whenFormulaSatisfied(formula);
+            break;
+          case "color_scale":
+            builder.setColorScale("green-yellow-red");
+            break;
+          case "data_bar":
+            builder.setDataBar();
+            break;
+          case "unique":
+            builder.setUniqueValues();
+            break;
+          case "duplicate":
+            builder.setDuplicateValues();
+            break;
+          default:
+            // Default useful rule: negatives red text
+            builder.whenNumberLessThan(0);
+        }
+
+        // Apply formats
+        if (background) builder.setBackground(background);
+        if (fontColor) builder.setFontColor(fontColor);
+        if (bold !== undefined) builder.setBold(!!bold);
+        if (italic !== undefined) builder.setItalic(!!italic);
+
+        const rule = builder.setRanges([fRange.getRange()]).build();
+        fWorksheet.addConditionalFormattingRule(rule);
+
+        return {
+          success: true,
+          message: `Added conditional formatting on ${range} (${ruleType || "number_lt 0"})`,
+          range,
+          ruleType: ruleType || "number_lt",
+        };
+      };
       const executeListColumns = async () => {
         if (!univerAPI) {
           throw new Error("Univer API not available");
