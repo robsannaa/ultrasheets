@@ -151,7 +151,7 @@ export const AddFilterTool = createSimpleTool(
 export const FormatCurrencyColumnTool = createSimpleTool(
   {
     name: "format_currency_column",
-    description: "Format a currency column with proper currency formatting",
+    description: "Format numeric monetary columns (not dates or text) with proper currency formatting. Intelligently detects currency columns by name and data type.",
     category: "format",
     requiredContext: ["tables", "columns"],
     invalidatesCache: false,
@@ -197,22 +197,62 @@ export const FormatCurrencyColumnTool = createSimpleTool(
         }
       } catch {}
 
-      // Auto-detect currency column as fallback
+      // Auto-detect currency column as fallback with enhanced intelligence
       if (!targetColumn) {
-        targetColumn = table.columns.find(
-          (c: any) =>
-            c.isCurrency ||
-            c.dataType === "currency" ||
-            ["price", "cost", "amount", "revenue", "value", "sales"].some(
-              (keyword) => c.name.toLowerCase().includes(keyword)
-            )
-        );
+        // Enhanced currency column detection
+        const currencyColumns = table.columns.filter((c: any) => {
+          const columnName = c.name.toLowerCase();
+          const hasMoneyKeywords = [
+            "price", "cost", "amount", "revenue", "value", "sales", "total", 
+            "income", "expense", "profit", "fee", "charge", "bill", "payment",
+            "money", "dollar", "euro", "currency", "cash", "budget", "financial"
+          ].some(keyword => columnName.includes(keyword));
+          
+          const hasMoneySymbols = /[\$€£¥₹]/.test(columnName);
+          
+          // Check if column has predominantly numeric data that looks like money
+          const hasNumericData = c.dataType === "number" || 
+            (c.sampleValues && c.sampleValues.some((v: any) => 
+              typeof v === 'number' && v > 0 && v < 1000000
+            ));
+          
+          // Exclude obvious non-currency columns
+          const isExcluded = [
+            "date", "time", "id", "index", "count", "quantity", "number",
+            "year", "month", "day", "week", "serial", "code", "zip", "phone"
+          ].some(keyword => columnName.includes(keyword));
+          
+          return (hasMoneyKeywords || hasMoneySymbols || c.isCurrency || c.dataType === "currency") 
+            && !isExcluded && hasNumericData;
+        });
+        
+        // Prefer the first currency column found
+        targetColumn = currencyColumns[0];
       }
     }
 
     if (!targetColumn) {
       throw new Error(
         `No currency column found. Available columns: ${table.columns
+          .map((c: any) => c.name)
+          .join(", ")}`
+      );
+    }
+
+    // Validate that the selected column is appropriate for currency formatting
+    const targetColumnName = targetColumn.name.toLowerCase();
+    const isDateColumn = ["date", "time", "created", "updated", "timestamp"].some(
+      keyword => targetColumnName.includes(keyword)
+    );
+    
+    if (isDateColumn) {
+      throw new Error(
+        `Cannot format "${targetColumn.name}" as currency - this appears to be a date/time column. ` +
+        `Available numeric columns: ${table.columns
+          .filter((c: any) => c.dataType === "number" || 
+            !["date", "time", "created", "updated", "timestamp"].some(
+              keyword => c.name.toLowerCase().includes(keyword)
+            ))
           .map((c: any) => c.name)
           .join(", ")}`
       );

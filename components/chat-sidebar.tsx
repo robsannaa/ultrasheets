@@ -339,14 +339,28 @@ export function ChatSidebar({ onMobileClose }: { onMobileClose?: () => void }) {
       clientEnv: mounted ? getClientEnv() : null,
       // Provide lightweight recent action history to improve pronoun resolution (e.g., "format it")
       workbookData: mounted
-        ? {
-            sheets: [],
-            // ultraActionLog is populated by client-side tool executions
-            recentActions:
-              typeof window !== "undefined" && (window as any).ultraActionLog
-                ? (window as any).ultraActionLog
-                : [],
-          }
+        ? (() => {
+            try {
+              const extracted = extractWorkbookData();
+              return {
+                ...extracted,
+                // ultraActionLog is populated by client-side tool executions
+                recentActions:
+                  typeof window !== "undefined" && (window as any).ultraActionLog
+                    ? (window as any).ultraActionLog
+                    : [],
+              };
+            } catch (error) {
+              console.warn("Failed to extract workbook data:", error);
+              return {
+                sheets: [],
+                recentActions:
+                  typeof window !== "undefined" && (window as any).ultraActionLog
+                    ? (window as any).ultraActionLog
+                    : [],
+              };
+            }
+          })()
         : null,
     },
   });
