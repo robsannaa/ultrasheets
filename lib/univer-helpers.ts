@@ -57,11 +57,49 @@ export async function applyFormatting(
   ) {
     anyRange.setUnderline(!!action.underline);
   }
-  if (action.textAlign && typeof anyRange.setTextAlign === "function") {
-    anyRange.setTextAlign(action.textAlign);
+  // Robust horizontal alignment across differing Facade APIs
+  if (action.textAlign) {
+    const horizontal = action.textAlign; // 'left' | 'center' | 'right'
+    const candidates: Array<[string, any[]]> = [
+      ["setTextAlign", [horizontal]],
+      ["setHorizontalAlign", [horizontal]],
+      ["setHorizontalAlignment", [horizontal]],
+      ["setAlign", ["horizontal", horizontal]],
+      ["setAlignment", [{ horizontal }]],
+      ["setStyle", [{ textAlign: horizontal }]],
+    ];
+    for (const [method, args] of candidates) {
+      if (typeof (anyRange as any)[method] === "function") {
+        try {
+          (anyRange as any)[method](...args);
+          break;
+        } catch {}
+      }
+    }
   }
-  if (action.verticalAlign && typeof anyRange.setVerticalAlign === "function") {
-    anyRange.setVerticalAlign(action.verticalAlign);
+
+  // Robust vertical alignment (normalize 'middle' to 'center' for APIs expecting 'center')
+  if (action.verticalAlign) {
+    const vRaw = action.verticalAlign;
+    const vertical = (vRaw === "middle" ? "center" : vRaw) as
+      | "top"
+      | "center"
+      | "bottom";
+    const candidates: Array<[string, any[]]> = [
+      ["setVerticalAlign", [vertical]],
+      ["setVerticalAlignment", [vertical]],
+      ["setAlign", ["vertical", vertical]],
+      ["setAlignment", [{ vertical }]],
+      ["setStyle", [{ verticalAlign: vertical }]],
+    ];
+    for (const [method, args] of candidates) {
+      if (typeof (anyRange as any)[method] === "function") {
+        try {
+          (anyRange as any)[method](...args);
+          break;
+        } catch {}
+      }
+    }
   }
   if (action.textWrap && typeof anyRange.setTextWrap === "function") {
     anyRange.setTextWrap(action.textWrap);

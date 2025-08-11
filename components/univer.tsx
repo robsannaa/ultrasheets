@@ -8,6 +8,7 @@ import "@univerjs/preset-sheets-advanced/lib/index.css";
 import "@univerjs/preset-sheets-conditional-formatting/lib/index.css";
 // Enable formula facade API (VLOOKUP/INDEX/MATCH and 500+ functions)
 import "@univerjs/sheets-formula/facade";
+
 // Global tool execution handler
 declare global {
   interface Window {
@@ -17,12 +18,14 @@ declare global {
     __ultraUniverAPI?: any;
     __ultraUniverLifecycleHookAdded?: boolean;
     __ultraUniverDispose?: () => void;
+    __univerWatermarkObserver?: MutationObserver;
   }
 }
 
 export function Univer() {
   const containerRef = useRef<HTMLDivElement>(null!);
   const { resolvedTheme } = useTheme();
+
   useEffect(() => {
     // Dynamic imports to avoid SSR issues
     const initializeUniver = async () => {
@@ -38,6 +41,7 @@ export function Univer() {
       const { UniverSheetsConditionalFormattingPreset } = await import(
         "@univerjs/preset-sheets-conditional-formatting"
       );
+
       // Table preset (optional; fall back if missing)
       let TablePreset: any = null;
       let tableLocales: any = null;
@@ -48,11 +52,10 @@ export function Univer() {
         );
         TablePreset = tablePresetMod.UniverSheetsTablePreset;
         tableLocales = tableLocaleMod.default;
-        // Optional CSS imports are safe in dev; skip if bundler lacks it
-        // Skip CSS import to avoid type resolution issues in certain builds
       } catch (e) {
         console.warn("⚠️ Table preset unavailable, continuing without it.", e);
       }
+
       // Use CalculationMode from sheets-formula to align with facade API
       const { CalculationMode } = await import("@univerjs/sheets-formula");
       const sheetsCoreEnUS = await import(
@@ -76,8 +79,6 @@ export function Univer() {
       } = await import("@univerjs/presets");
       const { LifecycleStages } = await import("@univerjs/core");
 
-      // Note: Advanced and drawing presets cause dependency conflicts, keeping simple for now
-
       // Try to import filter preset, fallback if it fails
       let filterPreset = null;
       let filterLocales = null;
@@ -88,10 +89,6 @@ export function Univer() {
         );
         filterPreset = filterModule.UniverSheetsFilterPreset;
         filterLocales = filterLocaleModule.default;
-
-        // Import filter CSS - try multiple possible paths
-        // Optional CSS; skip if not present in node_modules to avoid build errors
-        // Intentionally skip importing optional CSS to avoid type resolution errors in builds
         console.log("✅ Filter preset loaded successfully");
       } catch (error) {
         console.warn(
@@ -162,6 +159,64 @@ export function Univer() {
           : mergeLocales(sheetsCoreEnUS, tableLocales || {});
       }
 
+      // Helper: remove Univer watermark across API variants
+      const removeUniverWatermark = (api: any) => {
+        try {
+          // Try multiple API methods for watermark removal
+          if (typeof api?.removeWatermark === "function") api.removeWatermark();
+          if (typeof api?.deleteWatermark === "function") api.deleteWatermark();
+          if (typeof api?.hideWatermark === "function") api.hideWatermark();
+
+          // CSS-based watermark removal as fallback
+          const removeWatermarkCSS = () => {
+            const watermarkSelectors = [
+              '[class*="watermark"]',
+              '[class*="univer-watermark"]',
+              '[class*="logo"]',
+              "[data-watermark]",
+              ".univer-footer",
+              ".univer-brand",
+              'div[style*="watermark"]',
+              'div[style*="univer"]',
+            ];
+
+            watermarkSelectors.forEach((selector) => {
+              const elements = document.querySelectorAll(selector);
+              elements.forEach((el) => {
+                if (el instanceof HTMLElement) {
+                  el.style.display = "none";
+                  el.remove();
+                }
+              });
+            });
+          };
+
+          // Apply CSS removal immediately and on DOM changes
+          removeWatermarkCSS();
+
+          // Set up observer for dynamic watermark removal
+          if (
+            typeof window !== "undefined" &&
+            !window.__univerWatermarkObserver
+          ) {
+            const observer = new MutationObserver(() => {
+              removeWatermarkCSS();
+            });
+
+            observer.observe(document.body, {
+              childList: true,
+              subtree: true,
+              attributes: true,
+              attributeFilter: ["class", "style"],
+            });
+
+            window.__univerWatermarkObserver = observer;
+          }
+        } catch (error) {
+          console.warn("Watermark removal failed:", error);
+        }
+      };
+
       // If already initialized (HMR / re-render), reuse existing API
       if (
         typeof window !== "undefined" &&
@@ -170,25 +225,13 @@ export function Univer() {
       ) {
         // Remove Univer watermark if API available (HMR-safe)
         try {
-          if (
-            typeof (window.__ultraUniverAPI as any).removeWatermark ===
-            "function"
-          ) {
-            (window.__ultraUniverAPI as any).removeWatermark();
-          }
+          removeUniverWatermark(window.__ultraUniverAPI);
         } catch {}
 
-        // Reuse existing API and single dispatcher
+        // Reuse existing API
         const univerAPI = window.__ultraUniverAPI;
         (window as any).univerAPI = univerAPI;
-        if (typeof window.executeUniverTool !== "function") {
-          window.executeUniverTool = async (toolName: string, params?: any) => {
-            const fns = (window as any).__ultraToolFns || {};
-            const fn = fns[`execute_${toolName}`] || fns[toolName];
-            if (!fn) throw new Error(`Unknown tool: ${toolName}`);
-            return await fn(params);
-          };
-        }
+
         console.log(
           "🎯 Univer component: Reusing existing univerAPI (guarded re-init)"
         );
@@ -207,9 +250,7 @@ export function Univer() {
 
       // Remove Univer watermark if API available
       try {
-        if (typeof (univerAPI as any).removeWatermark === "function") {
-          (univerAPI as any).removeWatermark();
-        }
+        removeUniverWatermark(univerAPI);
       } catch {}
 
       // Force initial formula computing at lifecycle Starting for future workbooks
@@ -222,6 +263,10 @@ export function Univer() {
                 const formula = univerAPI.getFormula();
                 formula.setInitialFormulaComputing(CalculationMode.FORCED);
               }
+              // Re-assert watermark removal on lifecycle transitions
+              try {
+                removeUniverWatermark(univerAPI);
+              } catch {}
             }
           );
           window.__ultraUniverLifecycleHookAdded = true;
@@ -236,6 +281,11 @@ export function Univer() {
 
       // Create workbook
       univerAPI.createWorkbook({});
+
+      // Ensure watermark is removed after workbook creation
+      try {
+        removeUniverWatermark(univerAPI);
+      } catch {}
 
       // EXPOSE univerAPI GLOBALLY for chat component and guard flags
       (window as any).univerAPI = univerAPI;
@@ -252,1994 +302,38 @@ export function Univer() {
         (window as any).univerAPI = undefined;
       };
 
-      // Defer attaching dispatcher until after tool functions are declared below
+      // Initialize modern tool system only
+      const { setupModernUniverBridge } = await import(
+        "../lib/modern-univer-bridge"
+      );
+
       (window as any).__attachUltraDispatcher = () => {
-        const __toolFns: Record<string, any> = {
-          execute_list_columns: executeListColumns,
-          execute_calculate_total: executeCalculateTotal,
-          execute_create_pivot_table: executeCreatePivotTable,
-          execute_generate_chart: executeGenerateChart,
-          execute_format_currency: executeFormatCurrency,
-          execute_switch_sheet: executeSwitchSheet,
-          execute_add_filter: executeAddFilter,
-          execute_conditional_formatting: executeConditionalFormatting,
-          execute_auto_fit_columns: executeAutoFitColumns,
-          execute_find_cell: executeFindCell,
-          execute_format_as_table: executeFormatAsTable,
-        };
-        (window as any).__ultraToolFns = __toolFns;
-        window.executeUniverTool = async (toolName: string, params?: any) => {
-          const fns = (window as any).__ultraToolFns || {};
-          const fn = fns[`execute_${toolName}`] || fns[toolName];
-          if (!fn) throw new Error(`Unknown tool: ${toolName}`);
-          return await fn(params);
-        };
-      };
-
-      // Tool execution functions
-      const executeConditionalFormatting = async (params: any) => {
-        if (!univerAPI) throw new Error("Univer API not available");
-        const fWorkbook: any = univerAPI.getActiveWorkbook();
-        if (!fWorkbook) throw new Error("No active workbook available");
-        const fWorksheet: any = fWorkbook.getActiveSheet();
-
-        const {
-          range = "A1:A100",
-          ruleType,
-          // Numeric comparisons
-          min,
-          max,
-          equals,
-          // Text comparisons
-          contains,
-          startsWith,
-          endsWith,
-          // Formula
-          formula,
-          // Style
-          background,
-          fontColor,
-          bold,
-          italic,
-        } = params || {};
-
-        const fRange = fWorksheet.getRange(range);
-        const builder = fWorksheet.newConditionalFormattingRule();
-
-        // Choose condition
-        switch (ruleType) {
-          case "number_between":
-            builder.whenNumberBetween(min, max);
-            break;
-          case "number_gt":
-            builder.whenNumberGreaterThan(min);
-            break;
-          case "number_gte":
-            builder.whenNumberGreaterThanOrEqualTo(min);
-            break;
-          case "number_lt":
-            builder.whenNumberLessThan(max);
-            break;
-          case "number_lte":
-            builder.whenNumberLessThanOrEqualTo(max);
-            break;
-          case "number_eq":
-            builder.whenNumberEqualTo(equals);
-            break;
-          case "number_neq":
-            builder.whenNumberNotEqualTo(equals);
-            break;
-          case "text_contains":
-            builder.whenTextContains(contains);
-            break;
-          case "text_not_contains":
-            builder.whenTextDoesNotContain(contains);
-            break;
-          case "text_starts_with":
-            builder.whenTextStartsWith(startsWith);
-            break;
-          case "text_ends_with":
-            builder.whenTextEndsWith(endsWith);
-            break;
-          case "not_empty":
-            builder.whenCellNotEmpty();
-            break;
-          case "empty":
-            builder.whenCellEmpty();
-            break;
-          case "formula":
-            if (formula) builder.whenFormulaSatisfied(formula);
-            break;
-          case "color_scale":
-            builder.setColorScale("green-yellow-red");
-            break;
-          case "data_bar":
-            builder.setDataBar();
-            break;
-          case "unique":
-            builder.setUniqueValues();
-            break;
-          case "duplicate":
-            builder.setDuplicateValues();
-            break;
-          default:
-            // Default useful rule: negatives red text
-            builder.whenNumberLessThan(0);
-        }
-
-        // Apply formats
-        if (background) builder.setBackground(background);
-        if (fontColor) builder.setFontColor(fontColor);
-        if (bold !== undefined) builder.setBold(!!bold);
-        if (italic !== undefined) builder.setItalic(!!italic);
-
         try {
-          // Preferred API path (if supported by current Univer build)
-          if (typeof (builder as any).setRanges === "function") {
-            const rule = (builder as any)
-              .setRanges([fRange.getRange()])
-              .build();
-            (fWorksheet as any).addConditionalFormattingRule(rule);
-          } else {
-            // Fallback: emulate conditional formatting by styling cells that match
-            const startRow = (fRange as any).getRow?.() ?? 0;
-            const endRow = (fRange as any).getLastRow?.() ?? startRow;
-            const startCol = (fRange as any).getColumn?.() ?? 0;
-            const endCol = (fRange as any).getLastColumn?.() ?? startCol;
-
-            const parseNumber = (val: any): number => {
-              if (typeof val === "number") return val;
-              if (typeof val === "string") {
-                const cleaned = val
-                  .replace(/[,$\s]/g, "")
-                  .replace(/[A-Za-z€£¥$]/g, "");
-                const n = parseFloat(cleaned);
-                return isNaN(n) ? 0 : n;
-              }
-              return 0;
-            };
-
-            const matches = (n: number) => {
-              switch (ruleType) {
-                case "number_between":
-                  return n >= (min ?? n) && n <= (max ?? n);
-                case "number_gt":
-                  return n > (min ?? 0);
-                case "number_gte":
-                  return n >= (min ?? 0);
-                case "number_lt":
-                  return n < (max ?? 0);
-                case "number_lte":
-                  return n <= (max ?? 0);
-                case "number_eq":
-                  return n === (equals ?? n);
-                case "number_neq":
-                  return n !== (equals ?? n + 1);
-                case "not_empty":
-                  return true; // any non-empty handled below
-                case "empty":
-                  return false; // skip here
-                default:
-                  return false;
-              }
-            };
-
-            for (let r = startRow; r <= endRow; r++) {
-              for (let c = startCol; c <= endCol; c++) {
-                const cellRange: any = (fWorksheet as any).getRange(r, c, 1, 1);
-                const v = (cellRange as any).getValue?.();
-                const isEmpty = v === undefined || v === null || v === "";
-                const n = parseNumber(v);
-                const ok =
-                  ruleType === "empty"
-                    ? isEmpty
-                    : ruleType === "not_empty"
-                    ? !isEmpty
-                    : matches(n);
-                if (ok) {
-                  if (background) cellRange.setBackground?.(background);
-                  if (fontColor) cellRange.setFontColor?.(fontColor);
-                  if (bold !== undefined) cellRange.setBold?.(!!bold);
-                  if (italic !== undefined) cellRange.setItalic?.(!!italic);
-                }
-              }
-            }
-          }
-        } catch (e) {
-          console.warn(
-            "⚠️ Conditional formatting builder unavailable, applied fallback styling.",
-            e
-          );
-        }
-
-        return {
-          success: true,
-          message: `Added conditional formatting on ${range} (${
-            ruleType || "number_lt 0"
-          })`,
-          range,
-          ruleType: ruleType || "number_lt",
-        };
-      };
-
-      const executeAutoFitColumns = async (params: any) => {
-        if (!univerAPI) throw new Error("Univer API not available");
-        const fWorkbook: any = univerAPI.getActiveWorkbook();
-        if (!fWorkbook) throw new Error("No active workbook available");
-        const fWorksheet: any = fWorkbook.getActiveSheet();
-
-        const parseColumns = (spec: string): number[] => {
-          const cols: number[] = [];
-          const parts = spec
-            .split(",")
-            .map((s) => s.trim())
-            .filter(Boolean);
-          for (const p of parts) {
-            if (/^[A-Za-z]+:[A-Za-z]+$/.test(p)) {
-              const [a, b] = p.split(":");
-              const s = a.toUpperCase().charCodeAt(0) - 65;
-              const e = b.toUpperCase().charCodeAt(0) - 65;
-              const [start, end] = s <= e ? [s, e] : [e, s];
-              for (let i = start; i <= end; i++) cols.push(i);
-            } else if (/^[A-Za-z]+$/.test(p)) {
-              cols.push(p.toUpperCase().charCodeAt(0) - 65);
-            }
-          }
-          return Array.from(new Set(cols)).filter((i) => i >= 0);
-        };
-
-        const { columns, rowsSampleLimit = 1000 } = params || {};
-        const colIndexes = parseColumns(String(columns || "A"));
-
-        // First try built-in command: sheet.command.set-col-auto-width (Fit for data)
-        const tryBuiltinCommand = async (cols: number[]) => {
-          try {
-            const cmdMgr = (univerAPI as any).getCommandManager?.();
-            const sheet = fWorksheet?.getSheet?.();
-            const unitId = fWorkbook?.getUnitId?.() || fWorkbook?.getId?.();
-            const sheetId = sheet?.getSheetId?.() || sheet?.getId?.();
-            if (!cmdMgr?.executeCommand || unitId == null || sheetId == null)
-              return false;
-
-            // Group contiguous columns and issue fewer commands
-            const sorted = [...cols].sort((a, b) => a - b);
-            const ranges: Array<{ start: number; end: number }> = [];
-            let start = sorted[0];
-            let prev = sorted[0];
-            for (let i = 1; i < sorted.length; i++) {
-              const v = sorted[i];
-              if (v === prev + 1) {
-                prev = v;
-              } else {
-                ranges.push({ start, end: prev });
-                start = prev = v;
-              }
-            }
-            if (start != null) ranges.push({ start, end: prev });
-
-            for (const r of ranges) {
-              // Payload shape can differ across versions; try a few common shapes
-              const payloads = [
-                {
-                  unitId,
-                  subUnitId: sheetId,
-                  col: { start: r.start, end: r.end },
-                },
-                { unitId, sheetId, col: { start: r.start, end: r.end } },
-                {
-                  unitId,
-                  worksheetId: sheetId,
-                  range: { start: r.start, end: r.end },
-                },
-              ];
-              let ok = false;
-              for (const p of payloads) {
-                try {
-                  const res = await cmdMgr.executeCommand(
-                    "sheet.command.set-col-auto-width",
-                    p
-                  );
-                  if (res) {
-                    ok = true;
-                    break;
-                  }
-                } catch {
-                  // try next payload shape
-                }
-              }
-              if (!ok) return false;
-            }
-            return true;
-          } catch {
-            return false;
-          }
-        };
-
-        // Try built-in command only; if unavailable, report error (no heuristic fallback)
-        const usedBuiltin = await tryBuiltinCommand(colIndexes);
-        if (!usedBuiltin) {
-          return {
-            success: false,
-            error:
-              "Auto-fit columns is not supported in this build (native command unavailable).",
-          };
-        }
-
-        return {
-          success: true,
-          message: `Auto-fitted columns ${columns}`,
-          columns: colIndexes,
-          method: "command",
-        };
-      };
-
-      const executeFindCell = async (params: any) => {
-        if (!univerAPI) throw new Error("Univer API not available");
-        const { text, sheetName, match = "exact", column } = params || {};
-        const fWorkbook: any = univerAPI.getActiveWorkbook();
-        if (!fWorkbook) throw new Error("No active workbook available");
-        const fWorksheet: any = sheetName
-          ? fWorkbook
-              .getSheets()
-              .find((s: any) => s.getName?.() === sheetName) ||
-            fWorkbook.getActiveSheet()
-          : fWorkbook.getActiveSheet();
-
-        const snap = fWorksheet.getSheet().getSnapshot();
-        const data = snap?.cellData || {};
-        const colIndexFilter = column
-          ? column.toUpperCase().charCodeAt(0) - 65
-          : undefined;
-
-        for (const rKey of Object.keys(data)) {
-          const r = Number(rKey);
-          const row = data[r] || {};
-          const cKeys = Object.keys(row);
-          for (const cKey of cKeys) {
-            const c = Number(cKey);
-            if (typeof colIndexFilter === "number" && c !== colIndexFilter)
-              continue;
-            const v = row[c]?.v;
-            if (v == null) continue;
-            const s = String(v);
-            const ok = match === "contains" ? s.includes(text) : s === text;
-            if (ok) {
-              const addr = `${String.fromCharCode(65 + c)}${r + 1}`;
-              return {
-                success: true,
-                address: addr,
-                sheet: fWorksheet.getName?.(),
-              };
-            }
-          }
-        }
-        return { success: false, message: "Not found" };
-      };
-
-      const executeFormatAsTable = async (params: any) => {
-        if (!univerAPI) throw new Error("Univer API not available");
-        const fWorkbook: any = univerAPI.getActiveWorkbook();
-        const fWorksheet: any = fWorkbook.getActiveSheet();
-        const { range, name, tableId, showHeader = true, theme } = params || {};
-        const fRange = fWorksheet.getRange(range);
-        const id = tableId || `tbl_${Date.now().toString(36)}`;
-        const tName = name || id;
-
-        const ok = await fWorksheet.addTable(tName, fRange.getRange(), id, {
-          showHeader,
-        });
-        if (!ok) return { success: false, message: "Failed to add table" };
-
-        if (theme && typeof fWorksheet.addTableTheme === "function") {
-          try {
-            await fWorksheet.addTableTheme(id, { name: theme });
-          } catch {}
-        }
-
-        return {
-          success: true,
-          message: `Table ${tName} created`,
-          id,
-          name: tName,
-        };
-      };
-      const executeListColumns = async () => {
-        if (!univerAPI) {
-          throw new Error("Univer API not available");
-        }
-
-        const workbook = univerAPI.getActiveWorkbook();
-        if (!workbook) {
-          throw new Error("No active workbook available");
-        }
-
-        const worksheet = workbook.getActiveSheet();
-        if (!worksheet) {
-          throw new Error("No active worksheet available");
-        }
-
-        try {
-          // Get worksheet snapshot using proper Univer API
-          const sheetSnapshot = worksheet.getSheet().getSnapshot();
-          console.log("📊 list_columns: Got sheet snapshot:", {
-            hasSnapshot: !!sheetSnapshot,
-            name: sheetSnapshot?.name,
-            rowCount: sheetSnapshot?.rowCount,
-            columnCount: sheetSnapshot?.columnCount,
-            hasCellData: !!sheetSnapshot?.cellData,
-          });
-
-          if (!sheetSnapshot || !sheetSnapshot.cellData) {
-            return {
-              error: "No data found",
-              message:
-                "The spreadsheet appears to be empty or the data hasn't loaded yet.",
-              columns: [],
-              rowCount: 0,
-              sheetName: sheetSnapshot?.name || "Sheet1",
-            };
-          }
-
-          // Find column headers - they might not be in row 0
-          const cellData = sheetSnapshot.cellData;
-          const columns: string[] = [];
-          let headerRow = -1;
-
-          // Debug: Log first few rows to see structure
-          console.log("🔍 list_columns: Analyzing sheet structure:");
-          for (
-            let row = 0;
-            row < Math.min(3, sheetSnapshot.rowCount || 3);
-            row++
-          ) {
-            const rowData = cellData[row];
-            if (rowData) {
-              const rowValues = Object.keys(rowData)
-                .map((col) => (rowData as Record<string, any>)[col]?.v)
-                .filter((v) => v !== undefined);
-              console.log(`  Row ${row}:`, rowValues);
-            } else {
-              console.log(`  Row ${row}: empty`);
-            }
-          }
-
-          // Find the row with the most consecutive text values (likely headers)
-          for (
-            let row = 0;
-            row < Math.min(5, sheetSnapshot.rowCount || 5);
-            row++
-          ) {
-            const rowData = cellData[row] || {};
-            const tempColumns: string[] = [];
-
-            for (let col = 0; col < (sheetSnapshot.columnCount || 26); col++) {
-              const cell = rowData[col];
-              if (
-                cell &&
-                cell.v !== undefined &&
-                cell.v !== null &&
-                cell.v !== "" &&
-                typeof cell.v === "string" &&
-                !cell.f // Not a formula
-              ) {
-                tempColumns.push(String(cell.v));
-              } else if (tempColumns.length > 0) {
-                break; // Stop when we hit an empty cell after finding headers
-              }
-            }
-
-            // If this row has more columns than our current best, use it
-            if (
-              tempColumns.length > columns.length &&
-              tempColumns.length >= 2
-            ) {
-              columns.splice(0, columns.length, ...tempColumns);
-              headerRow = row;
-              console.log(
-                `📋 Found better header row ${row} with ${tempColumns.length} columns:`,
-                tempColumns
-              );
-            }
-          }
-
-          // Count rows with data (starting after header row)
-          let rowCount = 0;
-          const dataStartRow = headerRow + 1;
-
-          for (
-            let row = dataStartRow;
-            row < (sheetSnapshot.rowCount || 1000);
-            row++
-          ) {
-            const rowData = cellData[row];
-            if (rowData) {
-              let hasData = false;
-              // Check if row has data in any of the header columns
-              for (let col = 0; col < columns.length; col++) {
-                const cell = rowData[col];
-                if (
-                  cell &&
-                  cell.v !== undefined &&
-                  cell.v !== null &&
-                  cell.v !== ""
-                ) {
-                  hasData = true;
-                  break;
-                }
-              }
-              if (hasData) {
-                rowCount++; // Count actual data rows, not row index
-              }
-            }
-          }
-
-          console.log(
-            `📊 list_columns: Found ${columns.length} columns and ${rowCount} rows`
-          );
-
-          return {
-            columns,
-            rowCount,
-            sheetName: sheetSnapshot.name || "Sheet1",
-            message: `Found ${columns.length} columns and ${rowCount} rows of data.`,
-          };
-        } catch (error) {
+          setupModernUniverBridge();
+          console.log("🚀 Modern tool system initialized");
+        } catch (modernError) {
           console.error(
-            "❌ list_columns: Error accessing worksheet data:",
-            error
+            "❌ Failed to initialize modern tool system:",
+            modernError
           );
-          throw new Error(
-            `Failed to access worksheet data: ${
-              error instanceof Error ? error.message : "Unknown error"
-            }`
-          );
+          throw modernError; // Don't fall back to legacy - modern system is required
         }
       };
 
-      // Helpers for range/column parsing
-      const parseA1Range = (a1: string) => {
-        const [start, end] = a1.split(":");
-        const colToIndex = (s: string) => s.toUpperCase().charCodeAt(0) - 65; // A=0
-        const startCol = colToIndex(start.replace(/\d+/g, ""));
-        const startRow = parseInt(start.replace(/\D+/g, ""), 10) - 1; // 0-based
-        const endCol = colToIndex(end.replace(/\d+/g, ""));
-        const endRow = parseInt(end.replace(/\D+/g, ""), 10) - 1;
-        return { startRow, startCol, endRow, endCol };
-      };
-
-      const colLetterToOffset = (letter: string) =>
-        letter.toUpperCase().charCodeAt(0) - 65; // A=0
-
-      const executeCalculateTotal = async (params: any) => {
-        console.log("🔍 calculate_total: Starting execution...", params);
-
-        // Check readiness using the local univerAPI instance
-        if (!univerAPI) {
-          console.log("❌ calculate_total: Univer API not available");
-          throw new Error("Univer API not available");
-        }
-
-        const workbook = univerAPI.getActiveWorkbook();
-        if (!workbook) {
-          console.log("❌ calculate_total: No active workbook");
-          throw new Error("No active workbook available");
-        }
-
-        const worksheet = workbook.getActiveSheet();
-        if (!worksheet) {
-          console.log("❌ calculate_total: No active worksheet");
-          throw new Error("No active worksheet available");
-        }
-
-        console.log(
-          "✅ calculate_total: Univer is ready, accessing worksheet data..."
-        );
-
-        const { column, data_range, tableId } = params;
-
-        try {
-          // Get worksheet snapshot using proper Univer API
-          const sheetSnapshot = worksheet.getSheet().getSnapshot();
-
-          if (!sheetSnapshot || !sheetSnapshot.cellData) {
-            return {
-              error: "No data found",
-              message: "The spreadsheet appears to be empty.",
-            };
-          }
-
-          const cellData = sheetSnapshot.cellData;
-
-          // If a data_range or tableId is provided, restrict detection to that range
-          let scopedStartRow = 0;
-          let scopedEndRow = sheetSnapshot.rowCount || 1000;
-          let scopedStartCol = 0;
-          let scopedEndCol = (sheetSnapshot.columnCount || 26) - 1;
-
-          const scopedRange =
-            data_range || (tableId && String(tableId).split(":")[1]);
-          if (scopedRange && /^[A-Z]+\d+:[A-Z]+\d+$/i.test(scopedRange)) {
-            const { startRow, endRow, startCol, endCol } =
-              parseA1Range(scopedRange);
-            scopedStartRow = startRow;
-            scopedEndRow = endRow;
-            scopedStartCol = startCol;
-            scopedEndCol = endCol;
-          }
-
-          // Find headers using the same logic as list_columns
-          const headers: string[] = [];
-          let headerRow = -1;
-
-          // Find the row with the most consecutive text values (likely headers)
-          for (
-            let row = scopedStartRow;
-            row <= Math.min(scopedStartRow + 4, scopedEndRow);
-            row++
-          ) {
-            const rowData = cellData[row] || {};
-            const tempColumns: string[] = [];
-
-            for (let col = scopedStartCol; col <= scopedEndCol; col++) {
-              const cell = rowData[col];
-              if (
-                cell &&
-                cell.v !== undefined &&
-                cell.v !== null &&
-                cell.v !== "" &&
-                typeof cell.v === "string" &&
-                !cell.f
-              ) {
-                tempColumns.push(String(cell.v));
-              } else if (tempColumns.length > 0) {
-                break;
-              }
-            }
-
-            if (
-              tempColumns.length > headers.length &&
-              tempColumns.length >= 2
-            ) {
-              headers.splice(0, headers.length, ...tempColumns);
-              headerRow = row; // absolute row index
-            }
-          }
-
-          console.log("📊 calculate_total: Available headers:", headers);
-
-          // Find column index
-          let columnIndex = -1;
-          if (/^[A-Z]+$/.test(column)) {
-            // Interpret column letters relative to scoped range if provided
-            const offset = colLetterToOffset(column);
-            columnIndex = scopedStartCol + offset;
-          } else {
-            // Column name provided (e.g., 'Search_Volume')
-            const relIdx = headers.findIndex((h) =>
-              h.toLowerCase().includes(column.toLowerCase())
-            );
-            if (relIdx >= 0) columnIndex = scopedStartCol + relIdx;
-          }
-
-          if (columnIndex === -1) {
-            return {
-              error: "Column not found",
-              message: `Column '${column}' not found. Available columns: ${headers.join(
-                ", "
-              )}`,
-            };
-          }
-
-          console.log(
-            `📊 calculate_total: Found column at index ${columnIndex}`
-          );
-
-          // Calculate total from the data
-          let total = 0;
-          let count = 0;
-          let dataRowsProcessed = 0;
-
-          // Process all rows (starting after header row)
-          const dataStartRow = headerRow + 1;
-          for (let row = dataStartRow; row <= scopedEndRow; row++) {
-            const rowData = cellData[row];
-            if (rowData) {
-              const cell = rowData[columnIndex];
-              if (
-                cell &&
-                cell.v !== undefined &&
-                cell.v !== null &&
-                cell.v !== ""
-              ) {
-                const value = parseFloat(String(cell.v)) || 0;
-                if (!isNaN(value)) {
-                  total += value;
-                  count++;
-                }
-                dataRowsProcessed++;
-              }
-            }
-          }
-
-          console.log(
-            `📊 calculate_total: Processed ${dataRowsProcessed} rows, found ${count} numeric values, total: ${total}`
-          );
-
-          // ACTUALLY PLACE THE SUM IN THE SPREADSHEET
-          // First, check if there's already a sum in this column
-          let lastDataRow = dataStartRow;
-          let existingSumRow = -1;
-
-          for (let row = dataStartRow; row <= scopedEndRow; row++) {
-            const rowData = cellData[row];
-            if (rowData && rowData[columnIndex]) {
-              const cell = rowData[columnIndex];
-              if (
-                cell &&
-                cell.v !== undefined &&
-                cell.v !== null &&
-                cell.v !== ""
-              ) {
-                // Check if this cell contains a SUM formula
-                if (cell.f && String(cell.f).includes("SUM(")) {
-                  existingSumRow = row;
-                  console.log(
-                    `📊 Found existing SUM formula in row ${row + 1}`
-                  );
-                } else {
-                  // This is data, update lastDataRow
-                  lastDataRow = row;
-                }
-              }
-            }
-          }
-
-          let sumRow: number;
-          let sumCell: string;
-          const columnLetter = String.fromCharCode(65 + columnIndex);
-
-          if (existingSumRow >= 0) {
-            // Update existing sum
-            sumRow = existingSumRow;
-            sumCell = `${columnLetter}${sumRow + 1}`;
-            console.log(`📍 Updating existing SUM formula in cell ${sumCell}`);
-          } else {
-            // Create new sum
-            sumRow = lastDataRow + 2; // Place sum 2 rows below last data
-            sumCell = `${columnLetter}${sumRow + 1}`; // +1 because Univer uses 1-based indexing for display
-            console.log(`📍 Creating new SUM formula in cell ${sumCell}`);
-          }
-
-          // Create SUM formula range
-          const dataRange = `${columnLetter}${
-            dataStartRow + 1
-          }:${columnLetter}${lastDataRow + 1}`;
-          const sumFormula = `=SUM(${dataRange})`;
-
-          // Place the formula in the spreadsheet using Univer API
-          const sumRange = worksheet.getRange(sumRow, columnIndex, 1, 1);
-          sumRange.setValue(sumFormula);
-          // Execute formula calculation to avoid stale or flickering values
-          try {
-            const formula = univerAPI.getFormula();
-            formula.executeCalculation();
-          } catch {}
-
-          console.log(
-            `✅ calculate_total: Successfully placed sum in ${sumCell}`
-          );
-
-          // Store the sum cell globally for formatting operations
-          window.lastSumCell = sumCell;
-
-          return {
-            total,
-            count,
-            average: count > 0 ? total / count : 0,
-            column: headers[columnIndex] || column,
-            columnIndex,
-            dataRowsProcessed,
-            sumCell,
-            formula: sumFormula,
-            dataRange,
-            message: `Calculated total of ${total} from ${count} numeric values in column '${
-              headers[columnIndex] || column
-            }' and placed SUM formula in cell ${sumCell}`,
-          };
-        } catch (error) {
-          console.error("❌ calculate_total: Error processing data:", error);
-          throw new Error(
-            `Failed to calculate total: ${
-              error instanceof Error ? error.message : "Unknown error"
-            }`
-          );
-        }
-      };
-
-      const executeCreatePivotTable = async (params: any) => {
-        console.log("🔍 executeCreatePivotTable: Starting...", params);
-
-        if (!univerAPI) {
-          throw new Error("Univer API not available");
-        }
-
-        const {
-          groupBy,
-          valueColumn,
-          aggFunc,
-          destination,
-          sheetName,
-          data_range,
-          tableId,
-        } = params;
-
-        try {
-          const workbook = univerAPI.getActiveWorkbook();
-          if (!workbook) {
-            throw new Error("No active workbook available");
-          }
-          let worksheet: any = workbook.getActiveSheet();
-          // Create/switch sheet if requested (per docs API)
-          try {
-            if (sheetName && typeof (workbook as any).create === "function") {
-              // If not exists → create(name, rows, cols); then set active
-              const exists = (workbook as any)
-                .getSheets?.()
-                ?.find((s: any) => s.getName?.() === sheetName);
-              if (!exists) {
-                (workbook as any).create(sheetName, 100, 26);
-              }
-              const all = (workbook as any).getSheets?.() || [];
-              const target = all.find((s: any) => s.getName?.() === sheetName);
-              if (target) {
-                if (typeof (workbook as any).setActiveSheet === "function") {
-                  (workbook as any).setActiveSheet(target);
-                } else if (typeof target.activate === "function") {
-                  target.activate();
-                }
-                worksheet = target;
-              }
-            }
-          } catch (e) {
-            console.warn("⚠️ Sheet create/switch not supported:", e);
-          }
-
-          // Get worksheet snapshot
-          const sheetSnapshot = worksheet.getSheet().getSnapshot();
-          if (!sheetSnapshot || !sheetSnapshot.cellData) {
-            throw new Error("No data found in spreadsheet");
-          }
-
-          const cellData = sheetSnapshot.cellData;
-
-          // Scope to range if provided
-          const parseA1Range = (a1: string) => {
-            const [start, end] = a1.split(":");
-            const colToIndex = (s: string) =>
-              s.toUpperCase().charCodeAt(0) - 65; // A=0
-            const startCol = colToIndex(start.replace(/\d+/g, ""));
-            const startRow = parseInt(start.replace(/\D+/g, ""), 10) - 1; // 0-based
-            const endCol = colToIndex(end.replace(/\d+/g, ""));
-            const endRow = parseInt(end.replace(/\D+/g, ""), 10) - 1;
-            return { startRow, startCol, endRow, endCol };
-          };
-          let scopedStartRow = 0;
-          let scopedEndRow = sheetSnapshot.rowCount || 1000;
-          let scopedStartCol = 0;
-          let scopedEndCol = (sheetSnapshot.columnCount || 26) - 1;
-          const scopedRange =
-            data_range || (tableId && String(tableId).split(":")[1]);
-          if (scopedRange && /^[A-Z]+\d+:[A-Z]+\d+$/i.test(scopedRange)) {
-            const { startRow, endRow, startCol, endCol } =
-              parseA1Range(scopedRange);
-            scopedStartRow = startRow;
-            scopedEndRow = endRow;
-            scopedStartCol = startCol;
-            scopedEndCol = endCol;
-          }
-
-          // Find headers using same logic as other tools
-          const headers: string[] = [];
-          let headerRow = -1;
-
-          for (
-            let row = scopedStartRow;
-            row <= Math.min(scopedStartRow + 4, scopedEndRow);
-            row++
-          ) {
-            const rowData = cellData[row] || {};
-            const tempColumns: string[] = [];
-
-            for (let col = scopedStartCol; col <= scopedEndCol; col++) {
-              const cell = rowData[col];
-              if (cell && typeof cell.v === "string" && !cell.f) {
-                tempColumns.push(String(cell.v));
-              } else if (tempColumns.length > 0) {
-                break;
-              }
-            }
-
-            if (
-              tempColumns.length > headers.length &&
-              tempColumns.length >= 2
-            ) {
-              headers.splice(0, headers.length, ...tempColumns);
-              headerRow = row;
-            }
-          }
-
-          console.log(
-            "📊 executeCreatePivotTable: Available headers:",
-            headers
-          );
-
-          // Find column indices
-          let groupByIndex = -1;
-          let valueColumnIndex = -1;
-
-          if (/^[A-Z]+$/.test(groupBy)) {
-            groupByIndex = groupBy.charCodeAt(0) - 65;
-          } else {
-            groupByIndex = headers.findIndex((h) =>
-              h.toLowerCase().includes(groupBy.toLowerCase())
-            );
-          }
-
-          if (/^[A-Z]+$/.test(valueColumn)) {
-            valueColumnIndex = valueColumn.charCodeAt(0) - 65;
-          } else {
-            valueColumnIndex = headers.findIndex((h) =>
-              h.toLowerCase().includes(valueColumn.toLowerCase())
-            );
-          }
-
-          if (groupByIndex === -1 || valueColumnIndex === -1) {
-            throw new Error(
-              `Column not found. Available: ${headers.join(", ")}`
-            );
-          }
-
-          // Create pivot from data
-          const pivotMap = new Map<string, number[]>();
-          const dataStartRow = headerRow + 1;
-          for (let row = dataStartRow; row <= scopedEndRow; row++) {
-            const rowData = cellData[row];
-            if (rowData) {
-              const groupValue = rowData[groupByIndex]?.v;
-              const numericValue = parseFloat(
-                String(rowData[valueColumnIndex]?.v)
-              );
-
-              if (groupValue && !isNaN(numericValue)) {
-                const groupKey = String(groupValue);
-                if (!pivotMap.has(groupKey)) {
-                  pivotMap.set(groupKey, []);
-                }
-                pivotMap.get(groupKey)!.push(numericValue);
-              }
-            }
-          }
-
-          // Calculate aggregations
-          const pivotData: Array<{ group: string; value: number }> = [];
-          for (const [group, values] of pivotMap.entries()) {
-            let aggregatedValue: number;
-            switch (aggFunc) {
-              case "sum":
-                aggregatedValue = values.reduce((sum, val) => sum + val, 0);
-                break;
-              case "average":
-                aggregatedValue =
-                  values.reduce((sum, val) => sum + val, 0) / values.length;
-                break;
-              case "count":
-                aggregatedValue = values.length;
-                break;
-              case "max":
-                aggregatedValue = Math.max(...values);
-                break;
-              case "min":
-                aggregatedValue = Math.min(...values);
-                break;
-              default:
-                aggregatedValue = values.reduce((sum, val) => sum + val, 0);
-            }
-            pivotData.push({ group, value: aggregatedValue });
-          }
-
-          pivotData.sort((a, b) => a.group.localeCompare(b.group));
-
-          // Write pivot table to destination
-          let destCell = destination || "H2";
-          if (destCell.includes("!")) destCell = destCell.split("!")[1];
-          const [destCol, destRow] = [
-            destCell.charCodeAt(0) - 65,
-            parseInt(destCell.slice(1)) - 1,
-          ];
-
-          // Write headers
-          const headerRange1 = worksheet.getRange(destRow, destCol, 1, 1);
-          headerRange1.setValue(headers[groupByIndex]);
-
-          const headerRange2 = worksheet.getRange(destRow, destCol + 1, 1, 1);
-          headerRange2.setValue(
-            `${aggFunc.toUpperCase()} of ${headers[valueColumnIndex]}`
-          );
-
-          // Write data
-          for (let i = 0; i < pivotData.length; i++) {
-            const dataRow = destRow + 1 + i;
-            const groupRange = worksheet.getRange(dataRow, destCol, 1, 1);
-            groupRange.setValue(pivotData[i].group);
-
-            const valueRange = worksheet.getRange(dataRow, destCol + 1, 1, 1);
-            valueRange.setValue(pivotData[i].value);
-          }
-
-          console.log(
-            `✅ executeCreatePivotTable: Created pivot table at ${destCell}`
-          );
-
-          return {
-            success: true,
-            pivotData,
-            groupBy: headers[groupByIndex],
-            valueColumn: headers[valueColumnIndex],
-            aggFunc,
-            destination: destCell,
-            message: `Created pivot table grouping by '${headers[groupByIndex]}' with ${aggFunc} of '${headers[valueColumnIndex]}'. Found ${pivotData.length} groups.`,
-          };
-        } catch (error) {
-          console.error("❌ executeCreatePivotTable: Error:", error);
-          throw error;
-        }
-      };
-
-      const executeGenerateChart = async (params: any) => {
-        console.log("🔍 executeGenerateChart: Starting...", params);
-
-        if (!univerAPI) {
-          throw new Error("Univer API not available");
-        }
-
-        const {
-          data_range,
-          x_column,
-          y_columns,
-          tableId,
-          chart_type,
-          title,
-          position,
-          width = 400,
-          height = 300,
-        } = params;
-
-        try {
-          const workbook = univerAPI.getActiveWorkbook();
-          if (!workbook) {
-            throw new Error("No active workbook available");
-          }
-          const worksheet = workbook.getActiveSheet();
-
-          // Get worksheet snapshot
-          const sheetSnapshot = worksheet.getSheet().getSnapshot();
-          if (!sheetSnapshot || !sheetSnapshot.cellData) {
-            throw new Error("No data found in spreadsheet");
-          }
-
-          // Auto-detect data range if not provided; honor tableId if present
-          let finalDataRange =
-            data_range || (tableId && String(tableId).split(":")[1]);
-          if (!finalDataRange) {
-            // Find headers first
-            const cellData = sheetSnapshot.cellData;
-            const headers: string[] = [];
-            let headerRow = -1;
-
-            // Find the row with the most consecutive text values (likely headers)
-            for (
-              let row = 0;
-              row < Math.min(5, sheetSnapshot.rowCount || 5);
-              row++
-            ) {
-              const rowData = cellData[row] || {};
-              const tempColumns: string[] = [];
-
-              for (
-                let col = 0;
-                col < (sheetSnapshot.columnCount || 26);
-                col++
-              ) {
-                const cell = rowData[col];
-                if (cell && typeof cell.v === "string" && !cell.f) {
-                  tempColumns.push(String(cell.v));
-                } else if (tempColumns.length > 0) {
-                  break;
-                }
-              }
-
-              if (
-                tempColumns.length > headers.length &&
-                tempColumns.length >= 2
-              ) {
-                headers.splice(0, headers.length, ...tempColumns);
-                headerRow = row;
-              }
-            }
-
-            // Count data rows
-            let dataRowCount = 0;
-            const dataStartRow = headerRow + 1;
-            for (
-              let row = dataStartRow;
-              row < (sheetSnapshot.rowCount || 1000);
-              row++
-            ) {
-              const rowData = cellData[row];
-              if (rowData) {
-                let hasData = false;
-                for (let col = 0; col < headers.length; col++) {
-                  const cell = rowData[col];
-                  if (
-                    cell &&
-                    cell.v !== undefined &&
-                    cell.v !== null &&
-                    cell.v !== ""
-                  ) {
-                    hasData = true;
-                    break;
-                  }
-                }
-                if (hasData) dataRowCount++;
-              }
-            }
-
-            // Auto-detect range: from A1 to last column with data, including all data rows
-            const lastCol = String.fromCharCode(65 + headers.length - 1);
-            finalDataRange = `A${headerRow + 1}:${lastCol}${
-              dataStartRow + dataRowCount
-            }`;
-            console.log(
-              `📊 executeGenerateChart: Auto-detected data range: ${finalDataRange}`
-            );
-          }
-
-          // If x/y columns are specified, narrow the data range to just those columns
-          if ((x_column || y_columns) && finalDataRange) {
-            try {
-              const [start, end] = finalDataRange.split(":");
-              const startRow = parseInt(start.replace(/\D+/g, ""), 10) - 1;
-              const startColLetter = start.replace(/\d+/g, "");
-              const startColIndex = startColLetter.charCodeAt(0) - 65;
-
-              const cellData = sheetSnapshot.cellData;
-              const headerRowIndex = startRow; // headers at the first row of the range
-              const headers: string[] = [];
-              const rowData = cellData[headerRowIndex] || {};
-              // collect headers across the range width
-              const endColLetter = end.replace(/\d+/g, "");
-              const endColIndex = endColLetter.charCodeAt(0) - 65;
-              for (let c = startColIndex; c <= endColIndex; c++) {
-                const cell = rowData[c];
-                const hv = cell?.v;
-                headers.push(typeof hv === "string" ? hv : String(hv ?? ""));
-              }
-
-              const desiredX = x_column
-                ? String(x_column).trim().toLowerCase()
-                : null;
-              const desiredYs = Array.isArray(y_columns)
-                ? y_columns.map((s: any) => String(s).trim().toLowerCase())
-                : typeof y_columns === "string"
-                ? [String(y_columns).trim().toLowerCase()]
-                : [];
-
-              const keepCols: number[] = [];
-              for (let idx = 0; idx < headers.length; idx++) {
-                const h = String(headers[idx] || "")
-                  .trim()
-                  .toLowerCase();
-                if (desiredX && h === desiredX) keepCols.push(idx);
-                if (desiredYs.length && desiredYs.includes(h))
-                  keepCols.push(idx);
-              }
-
-              const uniqueKeep = Array.from(new Set(keepCols)).sort(
-                (a, b) => a - b
-              );
-              if (uniqueKeep.length >= 1) {
-                const first = uniqueKeep[0];
-                const last = uniqueKeep[uniqueKeep.length - 1];
-                const firstLetter = String.fromCharCode(
-                  65 + startColIndex + first
-                );
-                const lastLetter = String.fromCharCode(
-                  65 + startColIndex + last
-                );
-                const startRowNum = parseInt(start.replace(/\D+/g, ""), 10);
-                const endRowNum = parseInt(end.replace(/\D+/g, ""), 10);
-                finalDataRange = `${firstLetter}${startRowNum}:${lastLetter}${endRowNum}`;
-              }
-            } catch {}
-          }
-
-          // Determine chart position
-          const chartPosition = position || "H2";
-
-          // Map chart types to Univer enum values
-          const univerChartTypeMap: { [key: string]: string } = {
-            column: "Column",
-            line: "Line",
-            pie: "Pie",
-            bar: "Bar",
-            scatter: "Scatter",
-          };
-          const univerChartType = univerChartTypeMap[chart_type] || "Column";
-
-          console.log(
-            `📊 executeGenerateChart: Creating ${univerChartType} chart with range ${finalDataRange}`
-          );
-
-          // Insert native Univer chart via facade API
-          try {
-            const fWorkbook: any = univerAPI.getActiveWorkbook();
-            if (!fWorkbook) throw new Error("No active workbook available");
-            const fWorksheet: any = fWorkbook.getActiveSheet();
-            const enumType = (univerAPI as any).Enum?.ChartType || {};
-            const enumMap: Record<string, any> = {
-              column: enumType.Column,
-              line: enumType.Line,
-              pie: enumType.Pie,
-              bar: enumType.Bar,
-              scatter: enumType.Scatter,
-            };
-            const chartTypeEnum = enumMap[chart_type] ?? enumType.Column;
-
-            // Convert position like "H2" to row/col anchors (0-based)
-            const posCol = (
-              chartPosition.match(/[A-Z]+/i)?.[0] || "H"
-            ).toUpperCase();
-            const posRowNum =
-              parseInt(chartPosition.replace(/\D+/g, ""), 10) || 2;
-            const anchorRow = posRowNum - 1;
-            const anchorCol = posCol.charCodeAt(0) - 65;
-
-            const builder = fWorksheet
-              .newChart()
-              .setChartType(chartTypeEnum)
-              .addRange(finalDataRange)
-              .setPosition(anchorRow, anchorCol, 0, 0)
-              .setWidth(width)
-              .setHeight(height);
-
-            if (title) {
-              builder.setOptions("title.text", title);
-            }
-
-            const chartInfo = builder.build();
-            await fWorksheet.insertChart(chartInfo);
-          } catch (chartError) {
-            console.warn(
-              "⚠️ Native chart insertion failed, falling back.",
-              chartError
-            );
-            await createImprovedChart(
-              worksheet,
-              finalDataRange,
-              chart_type,
-              title,
-              chartPosition
-            );
-          }
-
-          console.log(
-            `✅ executeGenerateChart: Chart created at ${chartPosition}`
-          );
-
-          console.log(
-            `✅ executeGenerateChart: Chart placeholder created at ${chartPosition}`
-          );
-
-          return {
-            success: true,
-            chartType: univerChartType,
-            dataRange: finalDataRange,
-            position: chartPosition,
-            title,
-            width,
-            height,
-            message: `Created ${chart_type} chart "${title}" using data range ${finalDataRange}. Chart placeholder placed at ${chartPosition}.`,
-          };
-        } catch (error) {
-          console.error("❌ executeGenerateChart: Error:", error);
-          throw error;
-        }
-      };
-
-      const executeFormatCurrency = async (params: any) => {
-        console.log("💰 executeFormatCurrency: Starting...", params);
-
-        if (!univerAPI) {
-          throw new Error("Univer API not available");
-        }
-
-        let { range, currency, decimals = 2 } = params;
-
-        // If no range provided, try to use the last sum cell
-        if (!range && window.lastSumCell) {
-          range = window.lastSumCell;
-          console.log(`💰 executeFormatCurrency: Using last sum cell ${range}`);
-        }
-
-        if (!range) {
-          throw new Error("No range provided and no recent sum cell available");
-        }
-
-        try {
-          const fWorkbook = univerAPI.getActiveWorkbook();
-          if (!fWorkbook) {
-            throw new Error("No active workbook available");
-          }
-          const fWorksheet = fWorkbook.getActiveSheet();
-          const fRange = fWorksheet.getRange(range);
-
-          // Currency format patterns
-          const currencyFormats: { [key: string]: string } = {
-            USD: `$#,##0.${"0".repeat(decimals)}`,
-            EUR: `€#,##0.${"0".repeat(decimals)}`,
-            GBP: `£#,##0.${"0".repeat(decimals)}`,
-            JPY: `¥#,##0`,
-            CAD: `C$#,##0.${"0".repeat(decimals)}`,
-            AUD: `A$#,##0.${"0".repeat(decimals)}`,
-          };
-
-          const formatPattern =
-            currencyFormats[currency.toUpperCase()] ||
-            `${currency}#,##0.${"0".repeat(decimals)}`;
-
-          // Apply currency formatting using Univer's proper API
-          fRange.setNumberFormat(formatPattern);
-
-          console.log(
-            `✅ executeFormatCurrency: Applied ${currency} formatting to ${range}`
-          );
-
-          return {
-            success: true,
-            range,
-            currency,
-            decimals,
-            formatPattern,
-            message: `Applied ${currency} currency formatting to ${range}`,
-          };
-        } catch (error) {
-          console.error("❌ executeFormatCurrency: Error:", error);
-          throw error;
-        }
-      };
-
-      const executeSwitchSheet = async (params: any) => {
-        console.log("🔍 executeSwitchSheet: Starting...", params);
-
-        // TODO: Implement proper sheet switching with correct Univer API methods
-        // Current implementation uses methods that don't exist on FWorksheet
-        return {
-          success: false,
-          message:
-            "Sheet switching functionality requires proper Univer API implementation",
-          error: "Not implemented with correct API methods",
-        };
-      };
-
-      const executeAddFilter = async (params: any) => {
-        console.log("🔍 executeAddFilter: Starting...", params);
-
-        if (!univerAPI) {
-          throw new Error("Univer API not available");
-        }
-
-        const { range, column, filterValues, action = "add" } = params;
-
-        try {
-          const workbook = univerAPI.getActiveWorkbook();
-          if (!workbook) {
-            throw new Error("No active workbook available");
-          }
-
-          const worksheet = workbook.getActiveSheet();
-          if (!worksheet) {
-            throw new Error("No active worksheet available");
-          }
-
-          // Handle different actions
-          if (action === "clear") {
-            try {
-              // Clear all filters on the worksheet
-              const existingFilter = (worksheet as any).getFilter();
-              if (existingFilter) {
-                (existingFilter as any).remove();
-                return {
-                  success: true,
-                  message: "All filters cleared successfully",
-                };
-              } else {
-                return {
-                  success: true,
-                  message: "No filters to clear",
-                };
-              }
-            } catch (error) {
-              return {
-                success: false,
-                message: `Failed to clear filters: ${
-                  error instanceof Error ? error.message : "Unknown error"
-                }`,
-              };
-            }
-          }
-
-          // Auto-detect data range if not provided
-          let filterRange = range;
-          if (!filterRange) {
-            const sheetSnapshot = worksheet.getSheet().getSnapshot();
-            const cellData = sheetSnapshot.cellData || {};
-
-            // Find headers and data extent
-            let maxRow = 0;
-            let maxCol = 0;
-            for (const rowIndex in cellData) {
-              const row = parseInt(rowIndex);
-              maxRow = Math.max(maxRow, row);
-              for (const colIndex in cellData[rowIndex]) {
-                const col = parseInt(colIndex);
-                maxCol = Math.max(maxCol, col);
-              }
-            }
-
-            if (maxRow > 0 && maxCol > 0) {
-              filterRange = `A1:${String.fromCharCode(65 + maxCol)}${
-                maxRow + 1
-              }`;
-            } else {
-              filterRange = "A1:G51"; // Default range
-            }
-          }
-
-          console.log(`🔍 executeAddFilter: Using range ${filterRange}`);
-
-          // Parse the range to get the actual range object
-          const [startCell, endCell] = filterRange.split(":");
-          const startCol = startCell.charCodeAt(0) - 65;
-          const startRow = parseInt(startCell.slice(1)) - 1;
-          const endCol = endCell.charCodeAt(0) - 65;
-          const endRow = parseInt(endCell.slice(1)) - 1;
-
-          // Get the range object
-          const fRange = worksheet.getRange(
-            startRow,
-            startCol,
-            endRow - startRow + 1,
-            endCol - startCol + 1
-          );
-
-          if (action === "add") {
-            try {
-              // Try to use Univer's facade API for filters
-              console.log(
-                "🔍 executeAddFilter: Attempting to use Univer facade API"
-              );
-
-              // Get the facade API
-              const facade = (univerAPI as any).facade;
-              if (facade && facade.FWorkbook) {
-                const fWorkbook = facade.FWorkbook.getActiveWorkbook(univerAPI);
-                if (fWorkbook) {
-                  const fWorksheet = fWorkbook.getActiveSheet();
-                  if (fWorksheet) {
-                    console.log("🔍 executeAddFilter: Using facade FWorksheet");
-
-                    // Try to use the correct filter API from the facade
-                    const fRange2 = fWorksheet.getRange(filterRange);
-                    console.log(
-                      "🔍 executeAddFilter: Got facade range:",
-                      fRange2
-                    );
-
-                    // Try different filter method approaches
-                    if (typeof (fRange2 as any).createFilter === "function") {
-                      const filter = (fRange2 as any).createFilter();
-                      console.log(
-                        "🔍 executeAddFilter: Created filter via facade range"
-                      );
-
-                      if (column && filterValues && filterValues.length > 0) {
-                        // Find column index
-                        let columnIndex = -1;
-                        if (/^[A-Z]+$/.test(column.toUpperCase())) {
-                          columnIndex = column.toUpperCase().charCodeAt(0) - 65;
-                        } else {
-                          // Find by column name
-                          const sheetSnapshot = worksheet
-                            .getSheet()
-                            .getSnapshot();
-                          const cellData = sheetSnapshot.cellData || {};
-                          const headerRow = cellData[startRow] || {};
-
-                          for (let col = startCol; col <= endCol; col++) {
-                            const cell = headerRow[col];
-                            if (
-                              cell &&
-                              cell.v &&
-                              String(cell.v)
-                                .toLowerCase()
-                                .includes(column.toLowerCase())
-                            ) {
-                              columnIndex = col;
-                              break;
-                            }
-                          }
-                        }
-
-                        if (
-                          columnIndex >= 0 &&
-                          filter &&
-                          typeof (filter as any).setColumnFilterCriteria ===
-                            "function"
-                        ) {
-                          // Apply filter criteria
-                          (filter as any).setColumnFilterCriteria(columnIndex, {
-                            colId: columnIndex,
-                            filters: { filters: filterValues },
-                          });
-
-                          return {
-                            success: true,
-                            message: `Filter applied to column ${column}. Showing only: ${filterValues.join(
-                              ", "
-                            )}`,
-                            range: filterRange,
-                            column: column,
-                            columnIndex: columnIndex,
-                            filterValues: filterValues,
-                          };
-                        }
-                      }
-
-                      return {
-                        success: true,
-                        message: `Auto filter created for range ${filterRange}. Click dropdown arrows in headers to filter data.`,
-                        range: filterRange,
-                      };
-                    }
-                  }
-                }
-              }
-
-              // Fallback: Basic filter simulation by hiding rows
-              console.log("🔍 executeAddFilter: Using row hiding fallback");
-              if (column && filterValues && filterValues.length > 0) {
-                // Find column index
-                let columnIndex = -1;
-                if (/^[A-Z]+$/.test(column.toUpperCase())) {
-                  columnIndex = column.toUpperCase().charCodeAt(0) - 65;
-                } else {
-                  // Find by column name
-                  const sheetSnapshot = worksheet.getSheet().getSnapshot();
-                  const cellData = sheetSnapshot.cellData || {};
-                  const headerRow = cellData[startRow] || {};
-
-                  for (let col = startCol; col <= endCol; col++) {
-                    const cell = headerRow[col];
-                    if (
-                      cell &&
-                      cell.v &&
-                      String(cell.v)
-                        .toLowerCase()
-                        .includes(column.toLowerCase())
-                    ) {
-                      columnIndex = col;
-                      break;
-                    }
-                  }
-                }
-
-                if (columnIndex >= 0) {
-                  // Simple filter simulation: create a message showing what would be filtered
-                  const sheetSnapshot = worksheet.getSheet().getSnapshot();
-                  const cellData = sheetSnapshot.cellData || {};
-
-                  let matchingRows = 0;
-                  for (let row = startRow + 1; row <= endRow; row++) {
-                    const rowData = cellData[row];
-                    if (rowData && rowData[columnIndex]) {
-                      const cellValue = String(
-                        rowData[columnIndex].v || ""
-                      ).toLowerCase();
-                      const matches = filterValues.some(
-                        (filterVal: string) =>
-                          cellValue.includes(filterVal.toLowerCase()) ||
-                          filterVal.toLowerCase().includes(cellValue)
-                      );
-                      if (matches) {
-                        matchingRows++;
-                      }
-                    }
-                  }
-
-                  return {
-                    success: true,
-                    message: `Filter simulation: Found ${matchingRows} rows matching '${filterValues.join(
-                      ", "
-                    )}' in column ${column}. Note: Visual filtering requires filter UI components.`,
-                    range: filterRange,
-                    column: column,
-                    columnIndex: columnIndex,
-                    filterValues: filterValues,
-                    matchingRows: matchingRows,
-                  };
-                }
-              }
-
-              throw new Error(
-                "Unable to apply filter - filter API not available"
-              );
-            } catch (filterError) {
-              console.error("Filter creation failed:", filterError);
-              return {
-                success: false,
-                message: `Filter operation failed: ${
-                  filterError instanceof Error
-                    ? filterError.message
-                    : "Unknown error"
-                }. The filter functionality may require additional Univer components.`,
-                range: filterRange,
-              };
-            }
-          } else if (action === "remove" && column) {
-            try {
-              const fFilter = (fRange as any).getFilter();
-              if (fFilter) {
-                // Find column index
-                let columnIndex = -1;
-                if (/^[A-Z]+$/.test(column.toUpperCase())) {
-                  columnIndex = column.toUpperCase().charCodeAt(0) - 65;
-                } else {
-                  // Find by column name
-                  const sheetSnapshot = worksheet.getSheet().getSnapshot();
-                  const cellData = sheetSnapshot.cellData || {};
-                  const headerRow = cellData[startRow] || {};
-
-                  for (let col = startCol; col <= endCol; col++) {
-                    const cell = headerRow[col];
-                    if (
-                      cell &&
-                      cell.v &&
-                      String(cell.v)
-                        .toLowerCase()
-                        .includes(column.toLowerCase())
-                    ) {
-                      columnIndex = col;
-                      break;
-                    }
-                  }
-                }
-
-                if (columnIndex >= 0) {
-                  (fFilter as any).removeColumnFilterCriteria(columnIndex);
-                  return {
-                    success: true,
-                    message: `Filter removed from column ${column}`,
-                    column: column,
-                    columnIndex: columnIndex,
-                  };
-                } else {
-                  throw new Error(`Column '${column}' not found`);
-                }
-              } else {
-                return {
-                  success: true,
-                  message: "No filters to remove",
-                };
-              }
-            } catch (error) {
-              return {
-                success: false,
-                message: `Failed to remove filter: ${
-                  error instanceof Error ? error.message : "Unknown error"
-                }`,
-              };
-            }
-          }
-
-          return {
-            success: false,
-            message: `Unknown filter action: ${action}`,
-          };
-        } catch (error) {
-          console.error("❌ executeAddFilter: Error:", error);
-          throw error;
-        }
-      };
-
-      // Function to create improved chart display with working data
-      const createImprovedChart = async (
-        worksheet: any,
-        dataRange: string,
-        chartType: string,
-        title: string,
-        position: string
-      ) => {
-        try {
-          console.log(
-            `📊 createImprovedChart: Creating ${chartType} chart with data range ${dataRange}`
-          );
-
-          // Parse position to get row and column coordinates
-          const [posCol, posRow] = [
-            position.charCodeAt(0) - 65,
-            parseInt(position.slice(1)) - 1,
-          ];
-
-          // Extract data from the range
-          const chartData = await extractChartData(worksheet, dataRange);
-
-          if (!chartData || chartData.length === 0) {
-            console.log("❌ createImprovedChart: No data found in range");
-            const errorCell = worksheet.getRange(posRow, posCol, 1, 1);
-            errorCell.setValue(`❌ No data found in ${dataRange}`);
-            return;
-          }
-
-          // Generate chart URL with the improved data detection
-          const chartUrl = await generateImprovedChartUrl(
-            chartData,
-            chartType,
-            title
-          );
-
-          // Create a compact chart display
-          const titleCell = worksheet.getRange(posRow, posCol, 1, 1);
-          titleCell.setValue(`📊 ${title}`);
-
-          const urlCell = worksheet.getRange(posRow + 1, posCol, 1, 1);
-          urlCell.setValue(chartUrl);
-
-          const infoCell = worksheet.getRange(posRow + 2, posCol, 1, 1);
-          infoCell.setValue(
-            `${chartType.toUpperCase()}: ${chartData.length - 1} data points`
-          );
-
-          console.log(`✅ createImprovedChart: Chart created: ${chartUrl}`);
-        } catch (error) {
-          console.error("❌ createImprovedChart: Error creating chart:", error);
-
-          const [posCol, posRow] = [
-            position.charCodeAt(0) - 65,
-            parseInt(position.slice(1)) - 1,
-          ];
-          const errorCell = worksheet.getRange(posRow, posCol, 1, 1);
-          errorCell.setValue(`❌ Chart error: ${String(error).slice(0, 50)}`);
-        }
-      };
-
-      // Function to extract chart data from range
-      const extractChartData = async (worksheet: any, range: string) => {
-        try {
-          // Parse range like "A1:G51"
-          const [startCell, endCell] = range.split(":");
-
-          // Parse start cell (e.g., "A1")
-          const startCol = startCell.charCodeAt(0) - 65;
-          const startRow = parseInt(startCell.slice(1)) - 1;
-
-          // Parse end cell (e.g., "G51")
-          const endCol = endCell.charCodeAt(0) - 65;
-          const endRow = parseInt(endCell.slice(1)) - 1;
-
-          // Get sheet snapshot to access data
-          const sheetSnapshot = worksheet.getSheet().getSnapshot();
-          const cellData = sheetSnapshot.cellData;
-
-          const extractedData = [];
-
-          // Extract data row by row
-          for (
-            let row = startRow;
-            row <= Math.min(endRow, startRow + 100);
-            row++
-          ) {
-            // Limit to 100 rows for charts
-            const rowData = cellData[row];
-            if (rowData) {
-              const rowValues = [];
-              for (let col = startCol; col <= endCol; col++) {
-                const cell = rowData[col];
-                rowValues.push(cell ? cell.v : "");
-              }
-              // Only add rows that have some data
-              if (rowValues.some((val) => val !== "" && val != null)) {
-                extractedData.push(rowValues);
-              }
-            }
-          }
-
-          console.log(
-            `📊 extractChartData: Extracted ${extractedData.length} rows of data`
-          );
-          return extractedData;
-        } catch (error) {
-          console.error("❌ extractChartData: Error extracting data:", error);
-          return [];
-        }
-      };
-
-      // Function to generate improved chart URL with better data detection
-      const generateImprovedChartUrl = async (
-        data: any[],
-        chartType: string,
-        title: string
-      ) => {
-        try {
-          if (!data || data.length < 2) return null;
-
-          const headers = data[0]; // First row is headers
-          const dataRows = data.slice(1); // Skip headers row
-
-          console.log(
-            `📊 generateImprovedChartUrl: Processing ${dataRows.length} data rows with headers:`,
-            headers
-          );
-
-          // Validate we have meaningful data
-          if (dataRows.length === 0) {
-            console.error("❌ generateImprovedChartUrl: No data rows found");
-            return `https://quickchart.io/chart?c=${encodeURIComponent(
-              JSON.stringify({
-                type: "bar",
-                data: {
-                  labels: ["No Data"],
-                  datasets: [{ label: "Error", data: [0] }],
-                },
-              })
-            )}`;
-          }
-
-          // Dynamic column detection strategy
-          let labelColumnIndex = -1;
-          let valueColumnIndex = -1;
-
-          // Strategy 1: Look for common text/category column names for labels
-          const textColumnNames = [
-            "product",
-            "category",
-            "region",
-            "salesperson",
-            "name",
-            "item",
-            "type",
-          ];
-          for (let i = 0; i < headers.length; i++) {
-            const header = String(headers[i]).toLowerCase();
-            if (textColumnNames.some((name) => header.includes(name))) {
-              labelColumnIndex = i;
-              break;
-            }
-          }
-
-          // Strategy 2: Look for numeric columns for values (prefer rightmost numeric columns)
-          const numericColumnNames = [
-            "total",
-            "sale",
-            "amount",
-            "value",
-            "price",
-            "revenue",
-            "cost",
-          ];
-          for (let i = headers.length - 1; i >= 0; i--) {
-            const header = String(headers[i]).toLowerCase();
-            if (numericColumnNames.some((name) => header.includes(name))) {
-              valueColumnIndex = i;
-              break;
-            }
-          }
-
-          // Fallback: If no semantic matches, use first column for labels, last for values
-          if (labelColumnIndex === -1) {
-            labelColumnIndex = 0;
-          }
-          if (valueColumnIndex === -1) {
-            valueColumnIndex = Math.max(1, headers.length - 1);
-          }
-
-          console.log(
-            `📊 Using column ${labelColumnIndex} (${headers[labelColumnIndex]}) for labels, column ${valueColumnIndex} (${headers[valueColumnIndex]}) for values`
-          );
-
-          // Extract unique labels and aggregate values
-          const labelValueMap = new Map<string, number>();
-
-          for (const row of dataRows) {
-            const label = String(row[labelColumnIndex] || "Unknown");
-            const value = parseFloat(String(row[valueColumnIndex])) || 0;
-
-            if (labelValueMap.has(label)) {
-              labelValueMap.set(label, labelValueMap.get(label)! + value);
-            } else {
-              labelValueMap.set(label, value);
-            }
-          }
-
-          const labels = Array.from(labelValueMap.keys());
-          const salesData = Array.from(labelValueMap.values());
-
-          console.log(`📊 Chart data prepared: ${labels.length} categories`, {
-            labels,
-            values: salesData,
-          });
-
-          const chartTypeMap: { [key: string]: string } = {
-            column: "bar",
-            bar: "horizontalBar",
-            line: "line",
-            pie: "pie",
-            scatter: "scatter",
-          };
-
-          const config = {
-            type: chartTypeMap[chartType] || "bar",
-            data: {
-              labels: labels,
-              datasets: [
-                {
-                  label: headers[valueColumnIndex] || "Values",
-                  data: salesData,
-                  backgroundColor: [
-                    "rgba(255, 99, 132, 0.8)",
-                    "rgba(54, 162, 235, 0.8)",
-                    "rgba(255, 205, 86, 0.8)",
-                    "rgba(75, 192, 192, 0.8)",
-                    "rgba(153, 102, 255, 0.8)",
-                    "rgba(255, 159, 64, 0.8)",
-                  ],
-                },
-              ],
-            },
-            options: {
-              responsive: true,
-              plugins: {
-                title: {
-                  display: true,
-                  text: title,
-                },
-              },
-            },
-          };
-
-          // Generate QuickChart URL
-          const chartConfigString = JSON.stringify(config);
-          const encodedConfig = encodeURIComponent(chartConfigString);
-
-          return `https://quickchart.io/chart?w=600&h=400&c=${encodedConfig}`;
-        } catch (error) {
-          console.error("❌ generateImprovedChartUrl: Error:", error);
-          return `https://quickchart.io/chart?c=${encodeURIComponent(
-            JSON.stringify({
-              type: "bar",
-              data: { labels: ["Error"], datasets: [{ data: [0] }] },
-            })
-          )}`;
-        }
-      };
-
-      // Attach dispatcher now that all tool functions are declared
+      // Attach dispatcher
       try {
         (window as any).__attachUltraDispatcher?.();
       } catch (e) {
-        console.warn("⚠️ Failed to attach tool dispatcher:", e);
+        console.error("❌ Failed to attach modern tool dispatcher:", e);
+        throw e;
       }
 
       console.log("🎯 Univer component: Initialization complete");
+
+      // Additional persistent watermark removal
+      setTimeout(() => removeUniverWatermark(univerAPI), 1000);
+      setTimeout(() => removeUniverWatermark(univerAPI), 3000);
+      setTimeout(() => removeUniverWatermark(univerAPI), 5000);
     };
 
     initializeUniver().catch(console.error);
@@ -2254,5 +348,51 @@ export function Univer() {
     } catch {}
   }, [resolvedTheme]);
 
-  return <div ref={containerRef} className="h-full" />;
+  // Persistent watermark removal effect
+  useEffect(() => {
+    const removeWatermarks = () => {
+      try {
+        const api: any =
+          (window as any)?.__ultraUniverAPI || (window as any)?.univerAPI;
+        if (api) {
+          // Try API methods
+          if (typeof api?.removeWatermark === "function") api.removeWatermark();
+          if (typeof api?.deleteWatermark === "function") api.deleteWatermark();
+          if (typeof api?.hideWatermark === "function") api.hideWatermark();
+        }
+
+        // CSS-based removal
+        const watermarkSelectors = [
+          '[class*="watermark"]',
+          '[class*="univer-watermark"]',
+          '[class*="logo"]',
+          "[data-watermark]",
+          ".univer-footer",
+          ".univer-brand",
+          'div[style*="watermark"]',
+          'div[style*="univer"]',
+        ];
+
+        watermarkSelectors.forEach((selector) => {
+          const elements = document.querySelectorAll(selector);
+          elements.forEach((el) => {
+            if (el instanceof HTMLElement) {
+              el.style.display = "none";
+              el.remove();
+            }
+          });
+        });
+      } catch {}
+    };
+
+    // Run immediately and set up interval
+    removeWatermarks();
+    const interval = setInterval(removeWatermarks, 2000);
+
+    return () => clearInterval(interval);
+  }, []);
+
+  return (
+    <div ref={containerRef} className="h-full rounded-2xl overflow-hidden" />
+  );
 }

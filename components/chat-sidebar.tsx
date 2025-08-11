@@ -76,8 +76,11 @@ function ChatMessages({
   // Show all assistant text output without aggressive de-duplication
 
   return (
-    <ScrollArea className="h-full px-1 py-4" ref={scrollAreaRef}>
-      <div className="space-y-4">
+    <ScrollArea
+      className="h-full px-1 sm:px-2 py-2 sm:py-4"
+      ref={scrollAreaRef}
+    >
+      <div className="space-y-3">
         {mergedMessages.map((message) => {
           // Skip rendering empty assistant frames (no text and no tool badges)
           const hasParts = Array.isArray(message.parts);
@@ -103,18 +106,18 @@ function ChatMessages({
             <div
               key={message.id}
               className={cn(
-                "flex items-start gap-3",
+                "flex items-start gap-2",
                 message.role === "user" && "flex-row-reverse"
               )}
             >
-              <Avatar className="w-8 h-8">
+              <Avatar className="w-7 h-7">
                 <AvatarFallback>
                   {message.role === "user" ? "U" : "A"}
                 </AvatarFallback>
               </Avatar>
               <div
                 className={cn(
-                  "max-w-full sm:max-w-[75%] rounded-lg p-3 text-sm break-words whitespace-pre-wrap",
+                  "max-w-full sm:max-w-[85%] md:max-w-[75%] rounded-lg p-2 sm:p-3 text-sm break-words whitespace-pre-wrap",
                   message.role === "user"
                     ? "bg-primary text-primary-foreground"
                     : "bg-muted"
@@ -185,12 +188,16 @@ function ChatMessages({
                               );
                             }
                             return (
-                              <ToolBadge
+                              <div
                                 key={callId}
-                                label={label}
-                                toolName={toolName}
-                                state="result"
-                              />
+                                className="break-words max-w-full overflow-y-hidden"
+                              >
+                                <ToolBadge
+                                  label={label}
+                                  toolName={toolName}
+                                  state="result"
+                                />
+                              </div>
                             );
                           }
                           return null;
@@ -256,7 +263,7 @@ function ChatInput({
         value={input}
         onChange={handleInputChange}
         onKeyDown={handleKeyDown}
-        className="flex-1"
+        className="flex-1 text-sm"
       />
       <Button
         type="submit"
@@ -264,6 +271,7 @@ function ChatInput({
         disabled={isLoading || !input.trim()}
         aria-busy={isLoading}
         aria-disabled={isLoading || !input.trim()}
+        className="shrink-0"
       >
         {isLoading ? (
           <Loader2 className="h-4 w-4 animate-spin" />
@@ -275,189 +283,28 @@ function ChatInput({
   );
 }
 
+import { extractEnhancedWorkbookData } from "../lib/enhanced-context";
+import type { CleanSheetContext } from "../lib/clean-context-tools";
+
 // Rich workbook context with multi-table detection and recent action log
 function extractWorkbookData() {
-  try {
-    if (typeof window === "undefined" || !(window as any).univerAPI)
-      return null;
-    const w: any = window as any;
-    const univerAPI = w.univerAPI;
-    const workbook = univerAPI.getActiveWorkbook();
-    if (!workbook || typeof workbook.save !== "function") return null;
-
-    const activeSheet = workbook.getActiveSheet();
-    const activeSnapshot = activeSheet?.getSheet()?.getSnapshot();
-    const activeName = activeSnapshot?.name;
-
-    const wbData = workbook.save();
-    const sheetOrder: string[] = wbData.sheetOrder || [];
-    const sheetsData: Record<string, any> = wbData.sheets || {};
-
-    const detectTables = (cellData: any) => {
-      const tables: Array<{
-        range: string;
-        headers: string[];
-        recordCount: number;
-        numericColumns: string[];
-      }> = [];
-      if (!cellData) return tables;
-
-      const rows = Object.keys(cellData)
-        .map((k) => parseInt(k, 10))
-        .sort((a, b) => a - b);
-      const maxRow = rows.length ? rows[rows.length - 1] : 0;
-      let maxCol = 0;
-      for (const r of rows) {
-        const cols = Object.keys(cellData[r] || {}).map((k) => parseInt(k, 10));
-        if (cols.length) maxCol = Math.max(maxCol, cols[cols.length - 1]);
-      }
-
-      const headerCandidates: number[] = [];
-      for (let r = 0; r <= Math.min(maxRow, 20); r++) {
-        const rowData = cellData[r] || {};
-        let textRun = 0;
-        for (let c = 0; c <= Math.min(maxCol, 30); c++) {
-          const cell = rowData[c];
-          if (cell && typeof cell.v === "string" && cell.v.trim() && !cell.f)
-            textRun++;
-          else if (textRun > 0) break;
-        }
-        if (textRun >= 2) headerCandidates.push(r);
-      }
-
-      for (const headerRow of headerCandidates) {
-        const rowData = cellData[headerRow] || {};
-        const headers: string[] = [];
-        let firstCol = -1;
-        let lastCol = -1;
-        for (let c = 0; c <= Math.min(maxCol, 50); c++) {
-          const cell = rowData[c];
-          if (cell && typeof cell.v === "string" && cell.v.trim() && !cell.f) {
-            headers.push(String(cell.v).trim());
-            if (firstCol === -1) firstCol = c;
-            lastCol = c;
-          } else if (headers.length > 0) break;
-        }
-        if (headers.length < 2) continue;
-
-        let recordCount = 0;
-        for (
-          let r = headerRow + 1;
-          r <= Math.min(headerRow + 500, maxRow);
-          r++
-        ) {
-          const rd = cellData[r] || {};
-          let hasData = false;
-          for (let c = firstCol; c <= lastCol; c++) {
-            const cell = rd[c];
-            if (
-              cell &&
-              cell.v !== undefined &&
-              cell.v !== null &&
-              cell.v !== ""
-            ) {
-              hasData = true;
-              break;
-            }
-          }
-          if (hasData) recordCount++;
-          else if (recordCount > 0) break;
-        }
-
-        const startColLetter = String.fromCharCode(65 + Math.max(0, firstCol));
-        const endColLetter = String.fromCharCode(65 + Math.max(0, lastCol));
-        const range = `${startColLetter}${headerRow + 1}:${endColLetter}${
-          headerRow + 1 + recordCount
-        }`;
-
-        const numericColumns: string[] = [];
-        for (let c = firstCol; c <= lastCol; c++) {
-          let numericHits = 0;
-          for (
-            let r = headerRow + 1;
-            r <= headerRow + 1 + Math.min(5, recordCount);
-            r++
-          ) {
-            const cell = (cellData[r] || {})[c];
-            if (!cell) continue;
-            const v = cell.v;
-            if (
-              typeof v === "number" ||
-              (typeof v === "string" && /^[£$€¥]?\s*[\d,.]+$/.test(v))
-            )
-              numericHits++;
-          }
-          if (numericHits >= 2)
-            numericColumns.push(String.fromCharCode(65 + c));
-        }
-
-        tables.push({ range, headers, recordCount, numericColumns });
-      }
-
-      return tables;
-    };
-
-    const sheets = sheetOrder.map((sid) => {
-      const s = sheetsData[sid];
-      const name = s?.name || "Sheet";
-      const cellData = s?.cellData || {};
-
-      let totalCells = 0;
-      let maxRowUsed = -1;
-      let maxColUsed = -1;
-      for (const r in cellData) {
-        for (const c in cellData[r]) {
-          const cell = cellData[r][c];
-          if (cell && cell.v !== undefined && cell.v !== null && cell.v !== "")
-            totalCells++;
-          if (
-            cell &&
-            cell.v !== undefined &&
-            cell.v !== null &&
-            cell.v !== ""
-          ) {
-            const ri = parseInt(r, 10);
-            const ci = parseInt(c, 10);
-            if (ri > maxRowUsed) maxRowUsed = ri;
-            if (ci > maxColUsed) maxColUsed = ci;
-          }
-        }
-      }
-
-      const tables = detectTables(cellData);
-      const primaryHeaders = tables[0]?.headers || [];
-      const dataRows = tables[0]?.recordCount || 0;
-
-      // Compute used range like A1:D25 if any cell has data
-      const usedRange =
-        maxRowUsed >= 0 && maxColUsed >= 0
-          ? `A1:${String.fromCharCode(65 + maxColUsed)}${maxRowUsed + 1}`
-          : null;
-
-      return {
-        name,
-        isActive: name === activeName,
-        headers: primaryHeaders,
-        structure: { totalCells, dataRows },
-        usedRange,
-        tables,
-      };
-    });
-
-    const recentActions = Array.isArray(w.ultraActionLog)
-      ? (w.ultraActionLog as any[]).slice(-10)
-      : [];
-
-    return { sheets, recentActions };
-  } catch (error) {
-    console.error("Error extracting workbook data:", error);
-    return null;
-  }
+  // Use the enhanced context system
+  return extractEnhancedWorkbookData();
 }
 
-export function ChatSidebar() {
+export function ChatSidebar({ onMobileClose }: { onMobileClose?: () => void }) {
   const [mounted, setMounted] = React.useState(false);
   React.useEffect(() => setMounted(true), []);
+
+  // Auto-close mobile sidebar after successful actions
+  const handleSuccessfulAction = React.useCallback(() => {
+    if (onMobileClose) {
+      // Small delay to show the action completed
+      setTimeout(() => {
+        onMobileClose();
+      }, 1500);
+    }
+  }, [onMobileClose]);
   const getClientEnv = React.useCallback(() => {
     try {
       const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
@@ -484,14 +331,23 @@ export function ChatSidebar() {
       {
         id: "1",
         role: "assistant" as const,
-        content:
-          "Hello! I'm your advanced spreadsheet assistant. How can I help you analyze your spreadsheet data today?",
+        content: "How can we crack the spreadsheet today?",
       },
     ],
-    // Send workbook data with each request - this gets evaluated each time
+    // Send only client environment - LLM will use tools to get current spreadsheet state
     body: {
-      workbookData: extractWorkbookData(),
       clientEnv: mounted ? getClientEnv() : null,
+      // Provide lightweight recent action history to improve pronoun resolution (e.g., "format it")
+      workbookData: mounted
+        ? {
+            sheets: [],
+            // ultraActionLog is populated by client-side tool executions
+            recentActions:
+              typeof window !== "undefined" && (window as any).ultraActionLog
+                ? (window as any).ultraActionLog
+                : [],
+          }
+        : null,
     },
   });
 
@@ -783,6 +639,197 @@ export function ChatSidebar() {
                 });
                 if (w.ultraActionLog.length > 50) w.ultraActionLog.shift();
               } catch {}
+            } else if (action.type === "multipleActions") {
+              // Handle multiple actions in sequence
+              const w: any = window as any;
+              for (const subAction of action.actions) {
+                // Recursively handle each sub-action
+                if (subAction.type === "setCellValue") {
+                  if (!(window as any).univerAPI)
+                    throw new Error("Univer API not available");
+                  const univerAPI = (window as any).univerAPI;
+                  const workbook = univerAPI.getActiveWorkbook();
+                  const worksheet = workbook.getActiveSheet();
+                  const cellRef: string = subAction.cell;
+                  const isFormula: boolean = !!subAction.formula;
+                  const value = subAction.value;
+                  const colLetter = cellRef.replace(/\d+/g, "");
+                  const rowNumber = parseInt(cellRef.replace(/\D+/g, ""), 10);
+                  const colIndex = colLetter.charCodeAt(0) - 65;
+                  const rowIndex = rowNumber - 1;
+                  const range = worksheet.getRange(rowIndex, colIndex, 1, 1);
+                  const finalValue = isFormula
+                    ? String(value).startsWith("=")
+                      ? String(value)
+                      : `=${String(value)}`
+                    : value;
+                  range.setValue(finalValue);
+                }
+                // Add other sub-action types as needed
+              }
+              // Recalculate formulas after all actions
+              try {
+                const formula = (window as any).univerAPI.getFormula();
+                formula.executeCalculation();
+              } catch {}
+              // Log the multiple actions
+              try {
+                w.ultraActionLog = w.ultraActionLog || [];
+                w.ultraActionLog.push({
+                  at: new Date().toISOString(),
+                  tool: "smart_add_column",
+                  params: { count: action.actions.length },
+                  result: "ok",
+                });
+                if (w.ultraActionLog.length > 50) w.ultraActionLog.shift();
+              } catch {}
+            } else if (action.type === "getCleanSheetContext") {
+              // Get real sheet context with zero assumptions
+              const { getCleanSheetContext } = await import(
+                "../lib/clean-context-tools"
+              );
+              const univerAPI = (window as any).univerAPI;
+              if (!univerAPI) throw new Error("Univer API not available");
+
+              const cleanContext = await getCleanSheetContext(univerAPI);
+
+              // Return the context to the LLM by updating the message
+              console.log("🧠 Clean sheet context:", cleanContext);
+            } else if (action.type === "getCleanWorkbookState") {
+              // Get full workbook state with zero assumptions
+              const univerAPI = (window as any).univerAPI;
+              if (!univerAPI) throw new Error("Univer API not available");
+
+              const workbook = univerAPI.getActiveWorkbook();
+              const sheets = workbook.getSheets();
+
+              const workbookState = {
+                totalSheets: sheets.length,
+                activeSheet: workbook.getActiveSheet().getSheet().getSnapshot()
+                  .name,
+                sheets: sheets.map((sheet: any) => ({
+                  name: sheet.getSheet().getSnapshot().name,
+                  isActive: sheet === workbook.getActiveSheet(),
+                })),
+              };
+
+              console.log("🔍 Clean workbook state:", workbookState);
+              (window as any).__lastWorkbookState = workbookState;
+            } else if (action.type === "smartAddColumnWithContext") {
+              // Add column using SEMANTIC intelligence
+              const { getCleanSheetContext } = await import(
+                "../lib/clean-context-tools"
+              );
+              const univerAPI = (window as any).univerAPI;
+              if (!univerAPI) throw new Error("Univer API not available");
+
+              const cleanContext = await getCleanSheetContext(univerAPI);
+              const { columnName, formulaPattern, defaultValue } =
+                action.params;
+
+              // Find the best table to add column to
+              const targetRegion = cleanContext.analysis.dataRegions[0];
+              if (!targetRegion) throw new Error("No data regions found");
+
+              // Find next available column
+              const nextColumn =
+                cleanContext.analysis.emptyAreas.nextColumns[0];
+              if (!nextColumn) throw new Error("No space for new column");
+
+              const headerRow = parseInt(targetRegion.range.match(/\d+/)![0]);
+              const worksheet = univerAPI.getActiveWorkbook().getActiveSheet();
+
+              // 🧠 SEMANTIC INTELLIGENCE: Auto-detect if this column needs a calculation
+              let smartFormula = formulaPattern;
+
+              if (!smartFormula && targetRegion.semanticAnalysis) {
+                // Look for matching calculation in semantic analysis
+                const matchingCalc =
+                  targetRegion.semanticAnalysis.possibleCalculations.find(
+                    (calc) =>
+                      calc.newColumnName.toLowerCase() ===
+                        columnName.toLowerCase() ||
+                      columnName
+                        .toLowerCase()
+                        .includes(calc.newColumnName.toLowerCase()) ||
+                      calc.newColumnName
+                        .toLowerCase()
+                        .includes(columnName.toLowerCase())
+                  );
+
+                if (matchingCalc) {
+                  smartFormula = matchingCalc.formula;
+                  console.log(
+                    `🧠 SEMANTIC MATCH: "${columnName}" → ${matchingCalc.description}`
+                  );
+                  console.log(`📊 Auto-generated formula: ${smartFormula}`);
+                }
+              }
+
+              // Add header
+              const headerColIndex = nextColumn.charCodeAt(0) - 65;
+              const headerRowIndex = headerRow - 1;
+              worksheet
+                .getRange(headerRowIndex, headerColIndex, 1, 1)
+                .setValue(columnName);
+
+              // Add data with intelligent formula or fallback
+              if (smartFormula) {
+                for (let i = 1; i <= targetRegion.rowCount; i++) {
+                  const dataRow = headerRow + i;
+                  const formula = smartFormula.replace(
+                    /\{row\}/g,
+                    dataRow.toString()
+                  );
+                  const finalFormula = formula.startsWith("=")
+                    ? formula
+                    : `=${formula}`;
+                  worksheet
+                    .getRange(headerRowIndex + i, headerColIndex, 1, 1)
+                    .setValue(finalFormula);
+                }
+                console.log(
+                  `✨ Added column "${columnName}" with intelligent formula: ${smartFormula}`
+                );
+              } else if (defaultValue !== undefined) {
+                for (let i = 1; i <= targetRegion.rowCount; i++) {
+                  worksheet
+                    .getRange(headerRowIndex + i, headerColIndex, 1, 1)
+                    .setValue(defaultValue);
+                }
+                console.log(
+                  `✅ Added column "${columnName}" with default value: ${defaultValue}`
+                );
+              } else {
+                console.log(
+                  `ℹ️ Added empty column "${columnName}" - no semantic match found`
+                );
+              }
+
+              // Record a rich recent action so follow-ups like "format it" can target this column
+              try {
+                const headerCell = `${nextColumn}${headerRow}`;
+                const dataRange = `${nextColumn}${
+                  headerRow + 1
+                }:${nextColumn}$${headerRow + targetRegion.rowCount}`.replace(
+                  /\$+/g,
+                  ""
+                );
+                const w: any = window as any;
+                w.ultraActionLog = w.ultraActionLog || [];
+                w.ultraActionLog.push({
+                  at: new Date().toISOString(),
+                  tool: "smart_add_column",
+                  params: {
+                    columnName,
+                    headerCell,
+                    dataRange,
+                    tableRange: targetRegion.range,
+                  },
+                  result: "ok",
+                });
+                if (w.ultraActionLog.length > 50) w.ultraActionLog.shift();
+              } catch {}
             }
 
             // Mark as executed only after successful run
@@ -801,6 +848,30 @@ export function ChatSidebar() {
   // Format cells function
   const formatCells = async (action: any) => {
     const univerAPI = (window as any).univerAPI;
+    if (!univerAPI) throw new Error("Univer API not available");
+
+    // Allow special, explicit target tokens resolved via Univer context
+    // __AUTO_HEADERS__: resolve to header row of the primary data region (first detected region)
+    if (action?.range === "__AUTO_HEADERS__") {
+      const { getCleanSheetContext } = await import(
+        "../lib/clean-context-tools"
+      );
+      const clean = await getCleanSheetContext(univerAPI);
+      const region = clean?.analysis?.dataRegions?.[0];
+      if (!region?.range)
+        throw new Error("No data region found to resolve headers range");
+      const match = region.range.match(/([A-Z]+)(\d+):([A-Z]+)(\d+)/);
+      if (!match) throw new Error(`Invalid region range: ${region.range}`);
+      const startCol = match[1];
+      const startRow = parseInt(match[2], 10);
+      const endCol = match[3];
+      // Header row is the first row of the region
+      action = {
+        ...action,
+        range: `${startCol}${startRow}:${endCol}${startRow}`,
+      };
+    }
+
     await applyFormatting(univerAPI, action);
   };
 
@@ -825,12 +896,15 @@ export function ChatSidebar() {
     (status === "streaming" && !assistantHasContent);
 
   return (
-    <div className="h-full flex flex-col bg-background rounded-2xl my-2 mx-1 p-2">
-      <div className="p-4 border-b">
-        <div className="flex items-center justify-between">
-          <h2 className="text-lg font-semibold">Spreadsheet Master 🧠</h2>
+    <div className={`h-full flex flex-col bg-background`}>
+      {/* Only show header on desktop */}
+      {!onMobileClose && (
+        <div className="px-3 py-3 border-b">
+          <div className="flex items-center justify-between">
+            <h2 className="text-base font-semibold">Spreadsheet Master 🧠</h2>
+          </div>
         </div>
-      </div>
+      )}
 
       <div className="flex-1 overflow-hidden" suppressHydrationWarning>
         {mounted ? (
@@ -840,7 +914,7 @@ export function ChatSidebar() {
         )}
       </div>
 
-      <div className="p-4 border-t">
+      <div className={`${onMobileClose ? "p-3" : "px-3 py-3"}`}>
         <ChatInput
           input={input}
           handleInputChange={handleInputChange}
@@ -920,25 +994,19 @@ function ToolBadge({
 }) {
   const isRunning = state === "call";
   return (
-    <div className="my-1">
+    <div className="my-0.5">
       <div
         className={cn(
-          "inline-flex items-center gap-2 text-xs rounded-md px-2 py-1 border",
-          isRunning
-            ? "border-blue-300 bg-blue-50 text-blue-700"
-            : "border-green-300 bg-green-50 text-green-700"
+          "inline-flex items-center gap-1.5 text-xs rounded-md px-2 py-1 max-w-full break-words whitespace-normal",
+          isRunning ? "bg-blue-50 text-blue-700" : "bg-green-50 text-green-700"
         )}
       >
         {isRunning ? (
-          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          <Loader2 className="h-3 w-3 animate-spin shrink-0" />
         ) : (
-          <CheckCircle2 className="h-3.5 w-3.5" />
+          <CheckCircle2 className="h-3 w-3 shrink-0" />
         )}
-        <Wrench className="h-3.5 w-3.5 opacity-70" />
-        <span className="truncate max-w-[18rem]">{label}</span>
-        {toolName ? (
-          <span className="ml-2 text-[10px] opacity-70">({toolName})</span>
-        ) : null}
+        <span className="truncate text-xs font-medium">{label}</span>
       </div>
     </div>
   );
@@ -950,6 +1018,16 @@ function describeTool(toolName: string, args: any): string {
       return "List columns";
     case "calculate_total":
       return `Total for ${args?.column ?? "column"}`;
+    case "add_smart_totals":
+      return `Smart totals${
+        args?.columns
+          ? ` for ${args.columns.join(", ")}`
+          : " for all calculable columns"
+      }`;
+    case "format_recent_totals":
+      return `Format recent totals as ${args?.currency || "USD"}`;
+    case "format_currency_column":
+      return `Format currency column as ${args?.currency || "USD"}`;
     case "create_pivot_table":
       return `Pivot by ${args?.groupBy ?? "group"}`;
     case "generate_chart":
@@ -976,6 +1054,8 @@ function describeTool(toolName: string, args: any): string {
       return "Need range specification";
     case "get_sheet_context":
       return "Analyze spreadsheet";
+    case "get_workbook_snapshot":
+      return "Analyze workbook";
     default:
       return "Processing";
   }
