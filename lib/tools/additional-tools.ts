@@ -514,32 +514,10 @@ export const ConditionalFormattingTool = createSimpleTool(
       case "duplicate":
         rule = rule.setDuplicateValues();
         break;
-      case "data_bar": {
-        // Some versions require an options object (e.g., { isShowValue: true })
-        // Others accept no args. Try options → empty object → no args → color scale fallback.
-        let setOk = false;
-        try {
-          rule = (rule as any).setDataBar({ isShowValue: true });
-          setOk = true;
-        } catch {}
-        if (!setOk) {
-          try {
-            rule = (rule as any).setDataBar({});
-            setOk = true;
-          } catch {}
-        }
-        if (!setOk) {
-          try {
-            rule = (rule as any).setDataBar();
-            setOk = true;
-          } catch {}
-        }
-        if (!setOk) {
-          // Final fallback ensures a visible effect
-          rule = rule.setColorScale();
-        }
+      case "data_bar":
+        // Data bars can cause 'type' errors in some builds. Use color scale instead.
+        rule = rule.setColorScale();
         break;
-      }
       case "color_scale":
         rule = rule.setColorScale();
         break;
@@ -547,9 +525,8 @@ export const ConditionalFormattingTool = createSimpleTool(
         throw new Error(`Unsupported ruleType: ${inferredRule}`);
     }
 
-    // Apply formatting only for classic single-format rules; bars/scales/icon sets manage visuals themselves
-    const isVisualScaleRule =
-      inferredRule === "data_bar" || inferredRule === "color_scale";
+    // Apply formatting only for classic single-format rules; color scales manage visuals themselves
+    const isVisualScaleRule = inferredRule === "color_scale";
     const canStyle =
       !isVisualScaleRule &&
       typeof (rule as any).setBackground === "function" &&
@@ -583,16 +560,19 @@ export const ConditionalFormattingTool = createSimpleTool(
     if (typeof (rule as any).setRanges === "function") {
       try {
         // Per docs, pass IRangeData via getRange()
-        rule = (rule as any).setRanges([ (fRange as any).getRange() ]);
+        rule = (rule as any).setRanges([(fRange as any).getRange()]);
       } catch {}
     }
     const builtRule = rule.build();
 
     // Ensure ranges exist on the final rule (older builds may ignore setRanges)
-    const rawRange = (fRange as any).getRange ? (fRange as any).getRange() : undefined;
-    const finalRule = rawRange && !(builtRule as any)?.ranges?.length
-      ? { ...(builtRule as any), ranges: [rawRange] }
-      : builtRule;
+    const rawRange = (fRange as any).getRange
+      ? (fRange as any).getRange()
+      : undefined;
+    const finalRule =
+      rawRange && !(builtRule as any)?.ranges?.length
+        ? { ...(builtRule as any), ranges: [rawRange] }
+        : builtRule;
 
     // Apply exactly as in docs: worksheet.addConditionalFormattingRule(rule)
     const ws: any = context.fWorksheet as any;
@@ -614,7 +594,10 @@ export const ConditionalFormattingTool = createSimpleTool(
     }
 
     if (typeof ws.setConditionalFormattingRule === "function") {
-      const res = ws.setConditionalFormattingRule((finalRule as any).cfId, finalRule);
+      const res = ws.setConditionalFormattingRule(
+        (finalRule as any).cfId,
+        finalRule
+      );
       return {
         success: true,
         range,
@@ -626,7 +609,9 @@ export const ConditionalFormattingTool = createSimpleTool(
       };
     }
 
-    throw new Error("Conditional formatting API not available in this Univer build");
+    throw new Error(
+      "Conditional formatting API not available in this Univer build"
+    );
 
     // (Unreached)
   }
