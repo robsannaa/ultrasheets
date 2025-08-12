@@ -629,7 +629,9 @@ export const ConditionalFormattingTool = createSimpleTool(
       } catch {}
     }
     if (!applied) {
-      throw new Error("Failed to apply conditional formatting rule using available APIs");
+      throw new Error(
+        "Failed to apply conditional formatting rule using available APIs"
+      );
     }
 
     return {

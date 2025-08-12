@@ -13,6 +13,7 @@ import { useChat } from "ai/react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { ToolBadge } from "./ToolBadge";
+import Image from "next/image";
 
 function ChatMessages({
   messages,
@@ -288,7 +289,7 @@ export function ChatSidebar({ onMobileClose }: { onMobileClose?: () => void }) {
       {
         id: "1",
         role: "assistant" as const,
-        content: "How can we crack the spreadsheet today?",
+        content: "**Hey 👋** \nHow can I help you with your spreadsheet today?",
       },
     ],
     // Send only client environment - LLM will use tools to get current spreadsheet state
@@ -875,9 +876,10 @@ export function ChatSidebar({ onMobileClose }: { onMobileClose?: () => void }) {
     >
       {/* Only show header on desktop */}
       {!onMobileClose && (
-        <div className="px-3 py-3 border-b">
+        <div className="px-2 border-b">
           <div className="flex items-center justify-between">
-            <h2 className="text-base font-semibold">CellChat 🧠</h2>
+            <h2 className="text-base font-semibold">CellChat</h2>
+            <Image src="/logo.png" alt="CellChat" width={64} height={64} />
           </div>
         </div>
       )}

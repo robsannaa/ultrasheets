@@ -219,9 +219,10 @@ You do NOT have static spreadsheet data. Instead, you have tools to query the cu
 - This ensures you have fresh, accurate data about the current state
 
 CRITICAL: Before ANY operation (totals, formatting, charts, etc.), call get_workbook_snapshot to see:
-- Exact column headers (e.g., "Price (zł)", "Weight (kg)", "Rating")  
+- Exact column headers and their positions
 - Data locations and ranges
 - Sheet structure and content
+
 
 🧠 INTELLIGENT ANALYSIS LEVERAGE:
 The get_workbook_snapshot tool now provides INTELLIGENT ANALYSIS for each sheet:

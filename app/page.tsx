@@ -12,6 +12,7 @@ import { useIsMobile } from "@/hooks/use-mobile";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { MessageSquare, X } from "lucide-react";
+import Image from "next/image";
 
 export default function Home() {
   const isMobile = useIsMobile();
@@ -51,6 +52,12 @@ export default function Home() {
                   {/* Header with close button */}
                   <div className="flex items-center justify-between p-4 rounded-t-2xl bg-background">
                     <h2 className="text-lg font-semibold">CellChat</h2>
+                    <Image
+                      src="/logo.png"
+                      alt="CellChat"
+                      width={24}
+                      height={24}
+                    />
                     <Button
                       onClick={() => setShowSidebar(false)}
                       size="icon"

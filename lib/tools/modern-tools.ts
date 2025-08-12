@@ -38,7 +38,7 @@ export const AddSmartTotalsTool = createSimpleTool(
       } else if (/^\d+:[A-Z]+\d+:[A-Z]+\d+$/i.test(id)) {
         // If id looks like "0:A1:D6", try to match by range suffix
         const suffix = id.split(":").slice(1).join(":");
-        table = context.tables.find((t) => t.range === suffix) || null as any;
+        table = context.tables.find((t) => t.range === suffix) || (null as any);
       }
     }
     if (!table) {
@@ -178,7 +178,9 @@ export const AddFilterTool = createSimpleTool(
       }
 
       throw new Error(
-        `Table ${params.tableId || "primary"} not found. Available tables: ${context.tables
+        `Table ${
+          params.tableId || "primary"
+        } not found. Available tables: ${context.tables
           .map((t) => t.id)
           .join(", ")}`
       );
