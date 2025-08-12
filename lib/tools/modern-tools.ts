@@ -414,7 +414,7 @@ export const GenerateChartTool = createSimpleTool(
     name: "generate_chart",
     description: "Generate charts using intelligent table detection",
     category: "analysis",
-    requiredContext: ["tables", "spatial"],
+    requiredContext: ["tables"],
     invalidatesCache: false,
   },
   async (
@@ -453,13 +453,10 @@ export const GenerateChartTool = createSimpleTool(
       finalDataRange = table.range;
     }
 
-    // Determine chart position using spatial analysis
-    const position =
-      params.position ||
-      (() => {
-        const placement = context.findOptimalPlacement(width / 60, height / 20); // Rough cell conversion
-        return placement.range;
-      })();
+    // Determine chart position without speculative spatial analysis
+    const position = params.position
+      ? params.position
+      : context.findOptimalPlacement(width / 60, height / 20).range;
 
     // Chart type mapping
     const univerChartTypeMap: { [key: string]: string } = {
@@ -520,6 +517,7 @@ export const GetWorkbookSnapshotTool = createSimpleTool(
   async (context: UniversalToolContext, params: {}) => {
     // Force a fresh context to ensure latest data
     const freshContext = await context.refresh();
+    console.log("🔍 GetWorkbookSnapshotTool: Fresh context:", freshContext);
 
     return {
       activeSheet: freshContext.activeSheetName,
@@ -533,8 +531,6 @@ export const GetWorkbookSnapshotTool = createSimpleTool(
         ),
         calculableColumns: freshContext.calculableColumns,
         numericColumns: freshContext.numericColumns,
-        spatialZones:
-          freshContext.spatialMap?.optimalPlacementZones?.length || 0,
       },
       message: `Retrieved complete workbook context for ${freshContext.activeSheetName}`,
     };
@@ -647,14 +643,4 @@ export const SortTool = createSimpleTool(
   }
 );
 
-/**
- * Export all modern tools
- */
-export const MODERN_TOOLS = [
-  AddSmartTotalsTool,
-  AddFilterTool,
-  FormatCurrencyColumnTool,
-  GenerateChartTool,
-  GetWorkbookSnapshotTool,
-  SortTool,
-];
+// Unified tool assembly happens in lib/tools/index.ts (domain modules). No grouped export here.

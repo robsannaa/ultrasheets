@@ -17,28 +17,14 @@ import {
   invalidateUniversalContext,
   debugUniversalContext,
 } from "./universal-context";
-import { MODERN_TOOLS } from "./tools/modern-tools";
-import { MIGRATED_TOOLS } from "./tools/migrated-tools";
-import { ADDITIONAL_TOOLS } from "./tools/additional-tools";
+import { ALL_TOOLS } from "./tools";
 
 /**
  * Initialize the modern tool system
  */
 export function initializeModernTools(): void {
-  // Register all modern tools
-  MODERN_TOOLS.forEach((tool) => {
-    registerUniversalTool(tool);
-  });
-
-  // Register all migrated tools
-  MIGRATED_TOOLS.forEach((tool) => {
-    registerUniversalTool(tool);
-  });
-
-  // Register all additional tools
-  ADDITIONAL_TOOLS.forEach((tool) => {
-    registerUniversalTool(tool);
-  });
+  // Register all tools via unified entry
+  ALL_TOOLS.forEach((tool) => registerUniversalTool(tool));
 
   // Debug info in development
   if (process.env.NODE_ENV === "development") {

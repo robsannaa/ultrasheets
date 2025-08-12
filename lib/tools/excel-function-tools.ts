@@ -21,8 +21,8 @@ export const SmartFormulaBuilderTool = createSimpleTool(
   {
     name: "smart_formula_builder",
     description: "Build Excel formulas intelligently with context-aware range detection",
-    category: "formula",
-    requiredContext: ["tables", "columns", "spatial"],
+    category: "analysis",
+    requiredContext: ["tables", "columns"],
     invalidatesCache: false,
   },
   async (
@@ -488,8 +488,8 @@ function findOptimalFormulaPlacement(context: UniversalToolContext, suggestion: 
       return placement.range.split(":")[0]; // Just the top-left cell
     
     case "adjacent_column":
-      // Find empty column next to the table
-      const adjacentPlacement = context.findOptimalPlacement(1, 1, "right");
+      // Use placement helper and rely on client to position adjacent when needed
+      const adjacentPlacement = context.findOptimalPlacement(1, 1);
       return adjacentPlacement.range.split(":")[0];
     
     default:
@@ -555,7 +555,7 @@ export const BulkFormulaApplierTool = createSimpleTool(
   {
     name: "bulk_formula_applier",
     description: "Apply multiple Excel formulas efficiently in batch",
-    category: "formula",
+    category: "analysis",
     requiredContext: ["tables", "columns"],
     invalidatesCache: true,
   },
@@ -623,7 +623,4 @@ export const BulkFormulaApplierTool = createSimpleTool(
 /**
  * Export all Excel function tools
  */
-export const EXCEL_FUNCTION_TOOLS = [
-  SmartFormulaBuilderTool,
-  BulkFormulaApplierTool,
-];
+// Unified tool assembly happens in lib/tools/index.ts (domain modules). No grouped export here.

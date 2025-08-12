@@ -32,16 +32,7 @@ export function Univer() {
     const originalError = console.error;
     const originalWarn = console.warn;
 
-    console.error = (...args) => {
-      const message = args.join(" ");
-      if (
-        message.includes("Identifier") &&
-        message.includes("already exists")
-      ) {
-        return; // Suppress these specific errors
-      }
-      originalError.apply(console, args);
-    };
+    // Do not override console.error to keep React error stacks accurate
 
     console.warn = (...args) => {
       const message = args.join(" ");
@@ -325,6 +316,9 @@ export function Univer() {
   // No watermark heuristics; rely on official API call once during init
 
   return (
-    <div ref={containerRef} className="h-full rounded-2xl overflow-hidden" />
+    <div
+      ref={containerRef}
+      className="h-full rounded-2xl overflow-hidden m-2 overflow-x-hidden"
+    />
   );
 }

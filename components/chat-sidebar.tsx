@@ -4,249 +4,19 @@ import { useRef, useEffect } from "react";
 import * as React from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { ScrollArea } from "@/components/ui/scroll-area";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { Send, Loader2 } from "lucide-react";
+import { Send } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { applyFormatting } from "@/lib/univer-helpers";
 import { useChat } from "ai/react";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
 import { ToolBadge } from "./ToolBadge";
 import Image from "next/image";
+import { ChatMessages } from "./chat/chat-messages";
+import { ChatInput } from "./chat/chat-input";
+import { CollapsibleMarkdown } from "./chat/collapsible-markdown";
 
-function ChatMessages({
-  messages,
-  isLoading,
-}: {
-  messages: any[];
-  isLoading: boolean;
-}) {
-  const scrollAreaRef = useRef<HTMLDivElement>(null);
+// ChatMessages now imported from ./chat/chat-messages
 
-  useEffect(() => {
-    if (scrollAreaRef.current) {
-      const scrollContainer = scrollAreaRef.current.querySelector(
-        "[data-radix-scroll-area-viewport]"
-      );
-      if (scrollContainer) {
-        scrollContainer.scrollTop = scrollContainer.scrollHeight;
-      }
-    }
-  }, [messages]);
-
-  // Use messages as-is; no de-duplication of adjacent assistant frames
-  const mergedMessages = messages;
-
-  // Show all assistant text output without aggressive de-duplication
-
-  return (
-    <ScrollArea
-      className="h-full px-1 sm:px-2 py-2 sm:py-4"
-      ref={scrollAreaRef}
-    >
-      <div className="space-y-3">
-        {mergedMessages.map((message) => {
-          // Skip rendering empty assistant frames (no text and no tool badges)
-          const hasParts = Array.isArray(message.parts);
-          const hasTextPart = hasParts
-            ? message.parts.some(
-                (p: any) =>
-                  p.type === "text" &&
-                  typeof p.text === "string" &&
-                  p.text.trim().length > 0
-              )
-            : false;
-          const hasToolPart = hasParts
-            ? message.parts.some((p: any) => p.type === "tool-invocation")
-            : false;
-          const hasContent =
-            (typeof message.content === "string" &&
-              message.content.trim().length > 0) ||
-            hasTextPart ||
-            hasToolPart;
-          if (message.role === "assistant" && !hasContent) return null;
-
-          return (
-            <div
-              key={message.id}
-              className={cn(
-                "flex items-start gap-2",
-                message.role === "user" && "flex-row-reverse"
-              )}
-            >
-              <Avatar className="w-7 h-7">
-                <AvatarFallback>
-                  {message.role === "user" ? "U" : "A"}
-                </AvatarFallback>
-              </Avatar>
-              <div
-                className={cn(
-                  "max-w-full sm:max-w-[85%] md:max-w-[75%] rounded-lg p-2 sm:p-3 text-sm break-words whitespace-pre-wrap",
-                  message.role === "user"
-                    ? "bg-primary text-primary-foreground"
-                    : "bg-muted"
-                )}
-              >
-                {message.parts ? (
-                  <>
-                    {(() => {
-                      try {
-                        const text = message.parts
-                          .filter(
-                            (p: any) =>
-                              p.type === "text" && typeof p.text === "string"
-                          )
-                          .map((p: any) => p.text)
-                          .join("");
-                        return text ? (
-                          <CollapsibleMarkdown
-                            key="assistant-text"
-                            text={text}
-                          />
-                        ) : null;
-                      } catch {
-                        return null;
-                      }
-                    })()}
-                    {message.parts.map((part: any, index: number) => {
-                      switch (part.type) {
-                        case "text":
-                          return null; // already rendered once above
-                        case "tool-invocation": {
-                          const callId = part.toolInvocation.toolCallId;
-                          const toolName = part.toolInvocation.toolName;
-                          const state = part.toolInvocation.state;
-                          const args = part.toolInvocation.args;
-                          const label = describeTool(toolName, args);
-
-                          if (state === "call") {
-                            if (toolName === "get_sheet_context") return null;
-                            return (
-                              <ToolBadge
-                                key={callId}
-                                label={label}
-                                toolName={toolName}
-                                state="call"
-                              />
-                            );
-                          } else if (state === "result") {
-                            // Only show result for important operations, hide technical details
-                            const result = part.toolInvocation.result;
-                            if (toolName === "get_sheet_context") {
-                              return null; // Hide sheet context results - too technical
-                            }
-
-                            // Handle new error response format
-                            if (
-                              result &&
-                              typeof result === "object" &&
-                              result.error
-                            ) {
-                              return (
-                                <div
-                                  key={callId}
-                                  className="text-red-600 text-sm"
-                                >
-                                  ⚠️ {result.message || result.error}
-                                </div>
-                              );
-                            }
-                            return (
-                              <div
-                                key={callId}
-                                className="break-words max-w-full overflow-y-hidden"
-                              >
-                                <ToolBadge
-                                  label={label}
-                                  toolName={toolName}
-                                  state="result"
-                                />
-                              </div>
-                            );
-                          }
-                          return null;
-                        }
-                        default:
-                          // When parts exist, we do not render message.content fallback to avoid duplicates
-                          return null;
-                      }
-                    })}
-                  </>
-                ) : message.role === "assistant" ? (
-                  <div className="leading-6 prose prose-sm max-w-none dark:prose-invert break-words">
-                    <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                      {message.content}
-                    </ReactMarkdown>
-                  </div>
-                ) : (
-                  message.content
-                )}
-              </div>
-            </div>
-          );
-        })}
-        {/* Typing indicator removed: the send button already shows progress */}
-      </div>
-    </ScrollArea>
-  );
-}
-
-function ChatInput({
-  input,
-  handleInputChange,
-  handleSubmit,
-  isLoading,
-}: {
-  input: string;
-  handleInputChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
-  handleSubmit: (e: React.FormEvent<HTMLFormElement>) => void;
-  isLoading: boolean;
-}) {
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      const form = e.currentTarget.closest("form");
-      if (form) {
-        form.requestSubmit();
-      }
-    }
-  };
-
-  const handleFormSubmit = (e: React.FormEvent<HTMLFormElement>) => {
-    if (isLoading || !input.trim()) {
-      e.preventDefault();
-      return;
-    }
-    handleSubmit(e);
-  };
-
-  return (
-    <form onSubmit={handleFormSubmit} className="flex gap-2">
-      <Input
-        placeholder="Ask about your spreadsheet data..."
-        value={input}
-        onChange={handleInputChange}
-        onKeyDown={handleKeyDown}
-        className="flex-1 text-sm"
-      />
-      <Button
-        type="submit"
-        size="icon"
-        disabled={isLoading || !input.trim()}
-        aria-busy={isLoading}
-        aria-disabled={isLoading || !input.trim()}
-        className="shrink-0"
-      >
-        {isLoading ? (
-          <Loader2 className="h-4 w-4 animate-spin" />
-        ) : (
-          <Send className="h-4 w-4" />
-        )}
-      </Button>
-    </form>
-  );
-}
+// ChatInput now imported from ./chat/chat-input
 
 import { extractEnhancedWorkbookData } from "../lib/enhanced-context";
 import type { CleanSheetContext } from "../lib/clean-context-tools";
@@ -254,7 +24,16 @@ import type { CleanSheetContext } from "../lib/clean-context-tools";
 // Rich workbook context with multi-table detection and recent action log
 function extractWorkbookData() {
   // Use the enhanced context system
-  return extractEnhancedWorkbookData();
+  const enhanced = extractEnhancedWorkbookData();
+  try {
+    const w: any = window as any;
+    return {
+      ...enhanced,
+      cleanContext: w.__latestCleanContext || null,
+    };
+  } catch {
+    return enhanced;
+  }
 }
 
 export function ChatSidebar({ onMobileClose }: { onMobileClose?: () => void }) {
@@ -262,6 +41,22 @@ export function ChatSidebar({ onMobileClose }: { onMobileClose?: () => void }) {
   React.useEffect(() => setMounted(true), []);
 
   // Auto-close mobile sidebar after successful actions
+
+  // Capture a live clean sheet context for the LLM to use in deciding tool args
+  React.useEffect(() => {
+    const loadClean = async () => {
+      try {
+        const w: any = window as any;
+        if (!w.univerAPI) return;
+        const { getCleanSheetContext } = await import(
+          "../lib/clean-context-tools"
+        );
+        const clean = await getCleanSheetContext(w.univerAPI);
+        w.__latestCleanContext = clean;
+      } catch {}
+    };
+    loadClean();
+  }, []);
 
   const getClientEnv = React.useCallback(() => {
     try {
@@ -349,32 +144,44 @@ export function ChatSidebar({ onMobileClose }: { onMobileClose?: () => void }) {
           if (!result || !result.clientSideAction) continue;
 
           const action = result.clientSideAction;
-          
+
           // SMART deduplication: prevent IDENTICAL tool calls (same params) within rapid succession
           if (action.type === "executeUniverTool") {
-            const semanticKey = `${action.toolName}:${JSON.stringify(action.params)}`;
+            const semanticKey = `${action.toolName}:${JSON.stringify(
+              action.params
+            )}`;
             const now = Date.now();
             const lastExecution = recentExecutionsRef.current.get(semanticKey);
-            
+
             // Only block if IDENTICAL parameters within rapid timeframe (likely accidental duplicates)
             const rapidDuplicateWindow = 2000; // 2 seconds for identical calls
-            
-            if (lastExecution && (now - lastExecution) < rapidDuplicateWindow) {
-              console.warn(`🚫 BLOCKED: Identical ${action.toolName} call with same parameters within ${rapidDuplicateWindow/1000}s - likely duplicate`);
+
+            if (lastExecution && now - lastExecution < rapidDuplicateWindow) {
+              console.warn(
+                `🚫 BLOCKED: Identical ${
+                  action.toolName
+                } call with same parameters within ${
+                  rapidDuplicateWindow / 1000
+                }s - likely duplicate`
+              );
               if (callId) executedToolCallIdsRef.current.add(callId);
               continue;
             }
-            
+
             // Record this execution
             recentExecutionsRef.current.set(semanticKey, now);
-            
+
             // Clean up old entries (keep only last 10 seconds)
-            for (const [key, timestamp] of recentExecutionsRef.current.entries()) {
+            for (const [
+              key,
+              timestamp,
+            ] of recentExecutionsRef.current.entries()) {
               if (now - timestamp > 10000) {
                 recentExecutionsRef.current.delete(key);
               }
             }
           }
+
           try {
             if (
               action.type === "executeUniverTool" &&
@@ -557,8 +364,14 @@ export function ChatSidebar({ onMobileClose }: { onMobileClose?: () => void }) {
               const w: any = window as any;
               const univerAPI = (window as any).univerAPI;
               if (!univerAPI) throw new Error("Univer API not available");
-              const worksheet = univerAPI.getActiveWorkbook().getActiveSheet();
-              const source = worksheet.getRange(action.sourceRange);
+              const workbook = univerAPI.getActiveWorkbook();
+              const currentSheet = workbook.getActiveSheet();
+              const currentSheetName = currentSheet
+                ?.getSheet?.()
+                .getSnapshot?.().name;
+
+              // Read from source on current active sheet
+              const source = currentSheet.getRange(action.sourceRange);
               const values = source.getValues();
               const destTopLeft = action.destStartCell;
               const destColLetter = destTopLeft.replace(/\d+/g, "");
@@ -573,7 +386,37 @@ export function ChatSidebar({ onMobileClose }: { onMobileClose?: () => void }) {
                 0,
                 ...values.map((r: any[]) => r.length)
               );
-              const destRange = worksheet.getRange(
+
+              // Resolve destination sheet (optionally switch)
+              let destSheet = currentSheet;
+              const destSheetName: string | undefined = action.destSheetName;
+              if (
+                destSheetName &&
+                typeof workbook.getSheetByName === "function"
+              ) {
+                destSheet = workbook.getSheetByName(destSheetName) || destSheet;
+                if (!destSheet) {
+                  // try create then resolve
+                  try {
+                    if (typeof workbook.insertSheet === "function") {
+                      workbook.insertSheet(destSheetName);
+                      destSheet =
+                        workbook.getSheetByName(destSheetName) || currentSheet;
+                    }
+                  } catch {}
+                }
+                // set active to destination temporarily if API requires
+                try {
+                  if (
+                    destSheet &&
+                    typeof workbook.setActiveSheet === "function"
+                  ) {
+                    workbook.setActiveSheet(destSheetName);
+                  }
+                } catch {}
+              }
+
+              const destRange = destSheet.getRange(
                 destRowIndex,
                 destColIndex,
                 numRows,
@@ -581,6 +424,17 @@ export function ChatSidebar({ onMobileClose }: { onMobileClose?: () => void }) {
               );
               destRange.setValues(values);
               if (action.clearSource) source.clear();
+              // restore active sheet
+              try {
+                if (
+                  currentSheetName &&
+                  typeof workbook.setActiveSheet === "function" &&
+                  destSheetName &&
+                  destSheetName !== currentSheetName
+                ) {
+                  workbook.setActiveSheet(currentSheetName);
+                }
+              } catch {}
               try {
                 const formula = univerAPI.getFormula();
                 formula.executeCalculation();
@@ -726,7 +580,7 @@ export function ChatSidebar({ onMobileClose }: { onMobileClose?: () => void }) {
               if (!univerAPI) throw new Error("Univer API not available");
 
               const cleanContext = await getCleanSheetContext(univerAPI);
-              const { columnName, formulaPattern, defaultValue, insertBefore, insertAfter, between } =
+              const { columnName, formulaPattern, defaultValue } =
                 action.params;
 
               // Find the best table to add column to
@@ -734,54 +588,85 @@ export function ChatSidebar({ onMobileClose }: { onMobileClose?: () => void }) {
               if (!targetRegion) throw new Error("No data regions found");
 
               // Smart column positioning logic
+              // Robust A1 helpers and anchor resolution (supports AA, AB, ...)
+              const letterToIndex = (letters: string): number => {
+                let idx = 0;
+                const up = letters.toUpperCase();
+                for (let i = 0; i < up.length; i++) {
+                  idx = idx * 26 + (up.charCodeAt(i) - 64);
+                }
+                return idx - 1; // 0-based
+              };
+              const indexToLetter = (index: number): string => {
+                let n = index + 1;
+                let s = "";
+                while (n > 0) {
+                  const rem = (n - 1) % 26;
+                  s = String.fromCharCode(65 + rem) + s;
+                  n = Math.floor((n - 1) / 26);
+                }
+                return s;
+              };
+              const resolveAnchorToLetter = (
+                anchor: string | number
+              ): string | null => {
+                if (typeof anchor === "number")
+                  return indexToLetter(anchor - 1);
+                const text = String(anchor).trim();
+                if (/^[A-Za-z]+$/.test(text)) return text.toUpperCase();
+                if (/^\d+$/.test(text))
+                  return indexToLetter(parseInt(text, 10) - 1);
+                const headers: string[] = (targetRegion as any).headers || [];
+                const headerIdx = headers.findIndex(
+                  (h) => String(h).toLowerCase() === text.toLowerCase()
+                );
+                if (headerIdx >= 0) {
+                  const match = (targetRegion as any).range.match(
+                    /([A-Z]+)\d+:([A-Z]+)\d+/
+                  );
+                  if (match) {
+                    const startLetter = match[1];
+                    const startIndex = letterToIndex(startLetter);
+                    return indexToLetter(startIndex + headerIdx);
+                  }
+                }
+                return null;
+              };
               let targetColumnLetter: string;
-              
-              if (between && Array.isArray(between) && between.length === 2) {
-                // Insert between two columns (e.g., between D and E should insert at E)
-                const [leftCol, rightCol] = between;
-                // Convert column names to letters if needed
-                const leftLetter = typeof leftCol === 'string' && leftCol.length === 1 ? leftCol : 
-                  (targetRegion as any).headers?.find((h: any) => h.name === leftCol)?.letter || leftCol;
-                const rightLetter = typeof rightCol === 'string' && rightCol.length === 1 ? rightCol :
-                  (targetRegion as any).headers?.find((h: any) => h.name === rightCol)?.letter || rightCol;
-                
-                targetColumnLetter = rightLetter; // Insert at the position of the right column
-                console.log(`📍 Positioning: Between ${leftLetter} and ${rightLetter} → Insert at ${targetColumnLetter}`);
-              } else if (insertBefore) {
-                // Insert before a specific column
-                const beforeLetter = typeof insertBefore === 'string' && insertBefore.length === 1 ? insertBefore :
-                  (targetRegion as any).headers?.find((h: any) => h.name === insertBefore)?.letter || insertBefore;
-                targetColumnLetter = beforeLetter;
-                console.log(`📍 Positioning: Before ${beforeLetter} → Insert at ${targetColumnLetter}`);
-              } else if (insertAfter) {
-                // Insert after a specific column
-                const afterLetter = typeof insertAfter === 'string' && insertAfter.length === 1 ? insertAfter :
-                  (targetRegion as any).headers?.find((h: any) => h.name === insertAfter)?.letter || insertAfter;
-                const nextColIndex = afterLetter.charCodeAt(0) - 65 + 1;
-                targetColumnLetter = String.fromCharCode(65 + nextColIndex);
-                console.log(`📍 Positioning: After ${afterLetter} → Insert at ${targetColumnLetter}`);
-              } else {
-                // Default: use next available column
-                const nextColumn = cleanContext.analysis.emptyAreas.nextColumns[0];
-                if (!nextColumn) throw new Error("No space for new column");
-                targetColumnLetter = nextColumn;
-                console.log(`📍 Positioning: Default next available column → ${targetColumnLetter}`);
+              {
+                // Default: insert immediately AFTER the table's last column
+                const match = (targetRegion as any).range.match(
+                  /([A-Z]+)\d+:([A-Z]+)\d+/
+                );
+                if (!match) throw new Error("Invalid region range");
+                const endLetter = match[2];
+                const endIndex = letterToIndex(endLetter);
+                targetColumnLetter = indexToLetter(endIndex + 1);
+                console.log(
+                  `📍 Positioning: Default after table end → ${targetColumnLetter}`
+                );
               }
 
               const headerRow = parseInt(targetRegion.range.match(/\d+/)![0]);
               const worksheet = univerAPI.getActiveWorkbook().getActiveSheet();
 
-              // Insert column if position is specified (between, before, after)
-              if (between || insertBefore || insertAfter) {
-                const targetColIndex = targetColumnLetter.charCodeAt(0) - 65;
-                console.log(`📍 Inserting new column at index ${targetColIndex} (letter ${targetColumnLetter})`);
-                
+              // Always insert a new column at the resolved position (keeps grid consistent)
+              {
+                const targetColIndex = letterToIndex(targetColumnLetter);
+                console.log(
+                  `📍 Inserting new column at index ${targetColIndex} (letter ${targetColumnLetter})`
+                );
+
                 // Use correct Univer.js API: insertColumns (plural) not insertColumn
-                if (typeof worksheet.insertColumns === 'function') {
+                if (typeof worksheet.insertColumns === "function") {
                   worksheet.insertColumns(targetColIndex, 1);
-                  console.log(`✅ Successfully inserted column using insertColumns API`);
+                  console.log(
+                    `✅ Successfully inserted column using insertColumns API`
+                  );
                 } else {
-                  console.warn('⚠️ insertColumns method not available, column insertion skipped');
+                  console.warn(
+                    "⚠️ insertColumns method not available, column insertion skipped"
+                  );
                   // Fallback: proceed without actual insertion (data will be added to target position)
                 }
               }
@@ -814,7 +699,7 @@ export function ChatSidebar({ onMobileClose }: { onMobileClose?: () => void }) {
                 }
               }
 
-              // Add header  
+              // Add header
               const headerColIndex = targetColumnLetter.charCodeAt(0) - 65;
               const headerRowIndex = headerRow - 1;
               worksheet
@@ -859,10 +744,9 @@ export function ChatSidebar({ onMobileClose }: { onMobileClose?: () => void }) {
                 const headerCell = `${targetColumnLetter}${headerRow}`;
                 const dataRange = `${targetColumnLetter}${
                   headerRow + 1
-                }:${targetColumnLetter}$${headerRow + targetRegion.rowCount}`.replace(
-                  /\$+/g,
-                  ""
-                );
+                }:${targetColumnLetter}$${
+                  headerRow + targetRegion.rowCount
+                }`.replace(/\$+/g, "");
                 const w: any = window as any;
                 w.ultraActionLog = w.ultraActionLog || [];
                 w.ultraActionLog.push({
@@ -977,63 +861,7 @@ export function ChatSidebar({ onMobileClose }: { onMobileClose?: () => void }) {
   );
 }
 
-// Collapsible Markdown to keep assistant replies short by default
-function CollapsibleMarkdown({ text }: { text: string }) {
-  const [expanded, setExpanded] = React.useState(false);
-  const MAX_CHARS = 280;
-  const isLong = text && text.length > MAX_CHARS;
-  const display = expanded || !isLong ? text : text.slice(0, MAX_CHARS) + "…";
-
-  return (
-    <div className="leading-6 prose prose-sm max-w-none dark:prose-invert">
-      <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
-        components={{
-          table: () => <></>,
-          th: () => <></>,
-          td: () => <></>,
-          p: (props) => <p className="mb-1 leading-5" {...props} />,
-          h1: (props) => <h1 className="mb-1 text-base" {...props} />,
-          h2: (props) => <h2 className="mb-1 text-sm" {...props} />,
-          h3: (props) => <h3 className="mb-1 text-sm" {...props} />,
-          ul: (props) => <ul className="list-disc ml-4 mb-1" {...props} />,
-          ol: (props) => <ol className="list-decimal ml-4 mb-1" {...props} />,
-          code: ({ inline, children, ...props }: any) => (
-            <code
-              className={cn(
-                inline
-                  ? "px-1 py-0.5 rounded bg-muted"
-                  : "block p-3 rounded bg-muted overflow-x-auto"
-              )}
-              {...props}
-            >
-              {children}
-            </code>
-          ),
-          a: (props) => (
-            <a
-              className="underline text-primary"
-              target="_blank"
-              rel="noreferrer"
-              {...props}
-            />
-          ),
-        }}
-      >
-        {display}
-      </ReactMarkdown>
-      {isLong && (
-        <button
-          type="button"
-          className="mt-1 text-[11px] underline text-primary"
-          onClick={() => setExpanded((v) => !v)}
-        >
-          {expanded ? "Show less" : "Show details"}
-        </button>
-      )}
-    </div>
-  );
-}
+// CollapsibleMarkdown now imported from ./chat/collapsible-markdown
 
 function describeTool(toolName: string, args: any): string {
   switch (toolName) {

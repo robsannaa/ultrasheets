@@ -531,7 +531,4 @@ function calculateConfidence(prompt: string, groupBy: string | null, value: stri
 /**
  * Export all aggregated chart tools
  */
-export const AGGREGATED_CHART_TOOLS = [
-  CreateAggregatedChartTool,
-  SmartChartAnalyzerTool,
-];
+// Unified tool assembly happens in lib/tools/index.ts (domain modules). No grouped export here.

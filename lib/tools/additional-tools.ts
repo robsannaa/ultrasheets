@@ -6,8 +6,7 @@
 
 import { createSimpleTool } from "../tool-executor";
 import type { UniversalToolContext } from "../universal-context";
-import { AGGREGATED_CHART_TOOLS } from "./aggregated-chart-tools";
-import { EXCEL_FUNCTION_TOOLS } from "./excel-function-tools";
+// Aggregated and Excel function tools are included via domain modules; no grouped imports needed here.
 
 /**
  * AUTO FIT COLUMNS - Modern Implementation
@@ -1088,13 +1087,4 @@ export const FilterDataTool = createSimpleTool(
 /**
  * Export all additional tools
  */
-export const ADDITIONAL_TOOLS = [
-  AutoFitColumnsTool,
-  FindCellTool,
-  FormatAsTableTool,
-  ConditionalFormattingTool,
-  FindReplaceTool,
-  FilterDataTool, // Add the new filter data tool
-  ...AGGREGATED_CHART_TOOLS, // Add intelligent aggregated chart tools
-  ...EXCEL_FUNCTION_TOOLS, // Add comprehensive Excel function support
-];
+// Unified tool assembly happens in lib/tools/index.ts (domain modules). No grouped export here.

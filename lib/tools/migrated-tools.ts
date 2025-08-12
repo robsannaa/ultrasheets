@@ -853,12 +853,4 @@ export const ListColumnsTool = createSimpleTool(
 /**
  * Export all migrated tools
  */
-export const MIGRATED_TOOLS = [
-  CalculateTotalTool,
-  FormatRecentTotalsTool,
-  CreatePivotTableTool,
-  SwitchSheetTool,
-  CreateSheetTool,
-  FormatCellsTool,
-  ListColumnsTool,
-];
+// Unified tool assembly happens in lib/tools/index.ts (domain modules). No grouped export here.

@@ -1,3 +1,18 @@
+/* Compact markdown in chat: remove excessive gaps around paragraphs/headings */
+.chat-markdown p:empty {
+  margin: 0;
+  padding: 0;
+}
+.chat-markdown p {
+  margin-top: 0.25rem;
+  margin-bottom: 0.25rem;
+}
+.chat-markdown h1,
+.chat-markdown h2,
+.chat-markdown h3 {
+  margin-top: 0.25rem;
+  margin-bottom: 0.25rem;
+}
 @import "tailwindcss";
 @import "tw-animate-css";
 

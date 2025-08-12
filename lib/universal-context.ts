@@ -28,7 +28,7 @@ export interface UniversalWorkbookContext {
   primaryTable: any | null;
   calculableColumns: any[];
   numericColumns: any[];
-  spatialMap: any;
+  // spatialMap removed; placement uses simple helper based on primary table or defaults
 
   // Metadata
   lastUpdated: number;
@@ -105,13 +105,13 @@ class UniversalContextManager {
         values.forEach((row: any[], rowIndex: number) => {
           if (Array.isArray(row)) {
             row.forEach((cellValue: any, colIndex: number) => {
-              if (cellValue != null && cellValue !== '') {
+              if (cellValue != null && cellValue !== "") {
                 if (!extractedData[rowIndex]) {
                   extractedData[rowIndex] = {};
                 }
                 extractedData[rowIndex][colIndex] = {
                   v: cellValue,
-                  t: typeof cellValue === 'number' ? 1 : 0
+                  t: typeof cellValue === "number" ? 1 : 0,
                 };
                 cellsFound++;
               }
@@ -133,14 +133,14 @@ class UniversalContextManager {
             const cellRef = `${colLetter}${row + 1}`;
             const cell = fWorksheet.getRange(cellRef);
             const value = cell.getValue();
-            
-            if (value != null && value !== '') {
+
+            if (value != null && value !== "") {
               if (!extractedData[row]) {
                 extractedData[row] = {};
               }
               extractedData[row][col] = {
                 v: value,
-                t: typeof value === 'number' ? 1 : 0
+                t: typeof value === "number" ? 1 : 0,
               };
               cellsFound++;
             }
@@ -152,29 +152,33 @@ class UniversalContextManager {
     // Method 3: Enhanced Univer API approaches
     if (cellsFound === 0) {
       console.log("🔨 Trying enhanced Univer API methods...");
-      
+
       // Try getting worksheet snapshot and extracting data differently
       try {
         const sheetSnapshot = fWorksheet.getSheet().getSnapshot();
         if (sheetSnapshot && sheetSnapshot.cellData) {
           const snapshotCellData = sheetSnapshot.cellData;
-          console.log("🔨 Found snapshot cellData:", Object.keys(snapshotCellData).length, "rows");
-          
+          console.log(
+            "🔨 Found snapshot cellData:",
+            Object.keys(snapshotCellData).length,
+            "rows"
+          );
+
           // Process snapshot data
-          Object.keys(snapshotCellData).forEach(rowKey => {
+          Object.keys(snapshotCellData).forEach((rowKey) => {
             const row = parseInt(rowKey);
             const rowData = snapshotCellData[row];
-            if (rowData && typeof rowData === 'object') {
-              Object.keys(rowData).forEach(colKey => {
+            if (rowData && typeof rowData === "object") {
+              Object.keys(rowData).forEach((colKey) => {
                 const col = parseInt(colKey);
                 const cellData = rowData[col];
-                if (cellData && cellData.v != null && cellData.v !== '') {
+                if (cellData && cellData.v != null && cellData.v !== "") {
                   if (!extractedData[row]) {
                     extractedData[row] = {};
                   }
                   extractedData[row][col] = {
                     v: cellData.v,
-                    t: cellData.t || (typeof cellData.v === 'number' ? 1 : 0)
+                    t: cellData.t || (typeof cellData.v === "number" ? 1 : 0),
                   };
                   cellsFound++;
                 }
@@ -185,45 +189,53 @@ class UniversalContextManager {
       } catch (error) {
         console.log("🔨 Enhanced snapshot extraction failed:", error);
       }
-      
+
       // Try alternative range methods
       if (cellsFound === 0) {
         console.log("🔨 Trying alternative range access methods...");
         try {
           // Try different range sizes and methods
-          const rangesToTry = ['A1:Z50', 'A1:AA100', 'A1:IV200'];
-          
+          const rangesToTry = ["A1:Z50", "A1:AA100", "A1:IV200"];
+
           for (const rangeStr of rangesToTry) {
             try {
               const range = fWorksheet.getRange(rangeStr);
-              
+
               // Try different value extraction methods
-              const methods = ['getValues', 'getDisplayValues', 'getFormattedValues'];
-              
+              const methods = [
+                "getValues",
+                "getDisplayValues",
+                "getFormattedValues",
+              ];
+
               for (const method of methods) {
-                if (typeof range[method] === 'function') {
+                if (typeof range[method] === "function") {
                   try {
                     const values = range[method]();
                     if (values && Array.isArray(values) && values.length > 0) {
-                      console.log(`🔨 ${method} found data:`, values.length, "rows");
-                      
+                      console.log(
+                        `🔨 ${method} found data:`,
+                        values.length,
+                        "rows"
+                      );
+
                       values.forEach((row: any[], rowIndex: number) => {
                         if (Array.isArray(row)) {
                           row.forEach((cellValue: any, colIndex: number) => {
-                            if (cellValue != null && cellValue !== '') {
+                            if (cellValue != null && cellValue !== "") {
                               if (!extractedData[rowIndex]) {
                                 extractedData[rowIndex] = {};
                               }
                               extractedData[rowIndex][colIndex] = {
                                 v: cellValue,
-                                t: typeof cellValue === 'number' ? 1 : 0
+                                t: typeof cellValue === "number" ? 1 : 0,
                               };
                               cellsFound++;
                             }
                           });
                         }
                       });
-                      
+
                       if (cellsFound > 0) break;
                     }
                   } catch (methodError) {
@@ -231,7 +243,7 @@ class UniversalContextManager {
                   }
                 }
               }
-              
+
               if (cellsFound > 0) break;
             } catch (rangeError) {
               console.log(`🔨 Range ${rangeStr} failed:`, rangeError);
@@ -243,7 +255,9 @@ class UniversalContextManager {
       }
     }
 
-    console.log(`🔨 Brute force extraction completed: ${cellsFound} cells found`);
+    console.log(
+      `🔨 Brute force extraction completed: ${cellsFound} cells found`
+    );
     return extractedData;
   }
 
@@ -251,7 +265,7 @@ class UniversalContextManager {
    * Convert column index to letter (0=A, 1=B, etc.)
    */
   private columnToLetter(col: number): string {
-    let result = '';
+    let result = "";
     while (col >= 0) {
       result = String.fromCharCode((col % 26) + 65) + result;
       col = Math.floor(col / 26) - 1;
@@ -285,66 +299,77 @@ class UniversalContextManager {
     } catch (e) {
       console.warn("Could not flush workbook before snapshot:", e);
     }
-    
+
     const activeSheetSnapshot = fWorksheet.getSheet().getSnapshot();
     if (!activeSheetSnapshot) {
       throw new Error("Could not get sheet snapshot");
     }
 
-    console.log(`📊 Raw snapshot cellData keys: ${Object.keys(activeSheetSnapshot.cellData || {}).length}`);
-    
     // Enhanced data detection with multiple fallback methods
     let cellData = activeSheetSnapshot.cellData || {};
-    
+
     // Fallback 1: Enhanced range-based data access with multiple methods
     if (Object.keys(cellData).length === 0) {
-      console.log("🔄 Snapshot cellData empty, trying enhanced range-based fallback");
-      
-      const rangesToTry = ['A1:Z100', 'A1:AA200', 'A1:IV500'];
-      const methodsToTry = ['getValues', 'getDisplayValues', 'getFormattedValues'];
-      
+      console.log(
+        "🔄 Snapshot cellData empty, trying enhanced range-based fallback"
+      );
+
+      const rangesToTry = ["A1:Z100", "A1:AA200", "A1:IV500"];
+      const methodsToTry = [
+        "getValues",
+        "getDisplayValues",
+        "getFormattedValues",
+      ];
+
       for (const rangeStr of rangesToTry) {
         try {
           const range = fWorksheet.getRange(rangeStr);
-          
+
           for (const methodName of methodsToTry) {
-            if (typeof range[methodName] === 'function') {
+            if (typeof range[methodName] === "function") {
               try {
                 console.log(`🔄 Trying ${methodName} on range ${rangeStr}`);
                 const values = range[methodName]();
-                
+
                 // Convert range values to cellData format
                 const convertedCellData: any = {};
                 if (values && Array.isArray(values)) {
                   values.forEach((row, rowIndex) => {
                     if (Array.isArray(row)) {
                       row.forEach((cellValue, colIndex) => {
-                        if (cellValue != null && cellValue !== '') {
+                        if (cellValue != null && cellValue !== "") {
                           if (!convertedCellData[rowIndex]) {
                             convertedCellData[rowIndex] = {};
                           }
                           convertedCellData[rowIndex][colIndex] = {
                             v: cellValue,
-                            t: typeof cellValue === 'number' ? 1 : 0
+                            t: typeof cellValue === "number" ? 1 : 0,
                           };
                         }
                       });
                     }
                   });
                 }
-                
+
                 if (Object.keys(convertedCellData).length > 0) {
-                  console.log(`✅ ${methodName} on ${rangeStr} found data: ${Object.keys(convertedCellData).length} rows`);
+                  console.log(
+                    `✅ ${methodName} on ${rangeStr} found data: ${
+                      Object.keys(convertedCellData).length
+                    } rows`
+                  );
                   cellData = convertedCellData;
                   activeSheetSnapshot.cellData = cellData;
                   break;
                 }
               } catch (methodError) {
-                console.log(`⚠️ ${methodName} on ${rangeStr} failed:`, methodError);
+                console.log(
+                  `⚠️ ${methodName} on ${rangeStr} failed:`,
+                  methodError
+                );
               }
             }
           }
-          
+
           if (Object.keys(cellData).length > 0) break;
         } catch (rangeError) {
           console.warn(`⚠️ Range ${rangeStr} access failed:`, rangeError);
@@ -357,29 +382,35 @@ class UniversalContextManager {
       console.log("🔄 Range fallback empty, trying direct cell scanning");
       try {
         const scannedData: any = {};
-        for (let row = 0; row < 50; row++) { // Scan first 50 rows
-          for (let col = 0; col < 26; col++) { // Scan A-Z columns
+        for (let row = 0; row < 50; row++) {
+          // Scan first 50 rows
+          for (let col = 0; col < 26; col++) {
+            // Scan A-Z columns
             try {
               const colLetter = String.fromCharCode(65 + col);
               const cellRef = `${colLetter}${row + 1}`;
               const cell = fWorksheet.getRange(cellRef);
               const value = cell.getValue();
-              
-              if (value != null && value !== '') {
+
+              if (value != null && value !== "") {
                 if (!scannedData[row]) {
                   scannedData[row] = {};
                 }
                 scannedData[row][col] = {
                   v: value,
-                  t: typeof value === 'number' ? 1 : 0
+                  t: typeof value === "number" ? 1 : 0,
                 };
               }
             } catch {} // Ignore individual cell errors
           }
         }
-        
+
         if (Object.keys(scannedData).length > 0) {
-          console.log(`✅ Direct cell scan found data: ${Object.keys(scannedData).length} rows`);
+          console.log(
+            `✅ Direct cell scan found data: ${
+              Object.keys(scannedData).length
+            } rows`
+          );
           cellData = scannedData;
           activeSheetSnapshot.cellData = cellData;
         }
@@ -388,32 +419,32 @@ class UniversalContextManager {
       }
     }
 
-    console.log(`📊 Final cellData: ${Object.keys(cellData).length} rows detected`);
-
     // Focus on Univer API methods only - no DOM extraction
-
-    console.log(`📊 Final cellData after all fallbacks: ${Object.keys(cellData).length} rows detected`);
 
     // Force additional data extraction if still empty - aggressive approach
     if (Object.keys(cellData).length === 0) {
-      console.log("🚨 AGGRESSIVE: No data found through any method, trying brute force extraction");
+      console.log(
+        "🚨 AGGRESSIVE: No data found through any method, trying brute force extraction"
+      );
       cellData = await this.bruteForceDataExtraction(fWorksheet);
       if (Object.keys(cellData).length > 0) {
-        console.log(`🎯 Brute force extraction successful: ${Object.keys(cellData).length} rows found`);
+        console.log(
+          `🎯 Brute force extraction successful: ${
+            Object.keys(cellData).length
+          } rows found`
+        );
         activeSheetSnapshot.cellData = cellData;
       }
     }
 
-    console.log(`📊 FINAL RESULT: ${Object.keys(cellData).length} rows will be used for analysis`);
-
     // Run intelligent analysis
     const intelligence = analyzeSheetIntelligently(cellData);
-    
+
     // Fix table IDs to match chat route format: "sheetIndex:range"
     // Since we're processing the active sheet, use index 0
     const tablesWithSheetIndex = intelligence.tables.map((table: any) => ({
       ...table,
-      id: `0:${table.range}` // Prefix with sheet index as expected by chat route
+      id: `0:${table.range}`, // Prefix with sheet index as expected by chat route
     }));
 
     return {
@@ -424,7 +455,7 @@ class UniversalContextManager {
       activeSheetSnapshot,
       intelligence: {
         ...intelligence,
-        tables: tablesWithSheetIndex
+        tables: tablesWithSheetIndex,
       },
       tables: tablesWithSheetIndex,
       primaryTable: tablesWithSheetIndex[0] || null,
@@ -438,7 +469,7 @@ class UniversalContextManager {
           .filter((col: any) => col.isNumeric)
           .map((col: any) => col.name)
       ),
-      spatialMap: intelligence.spatialMap,
+      // spatialMap removed
       lastUpdated: Date.now(),
       cacheValid: true,
     };
@@ -500,34 +531,14 @@ class UniversalContextManager {
     };
 
     enriched.findOptimalPlacement = (width: number, height: number) => {
-      // Use spatial map to find best placement
-      const spatialMap = enriched.spatialMap;
-
-      // Default to right of primary table if no spatial analysis
-      if (!spatialMap && enriched.primaryTable) {
+      // Simple, deterministic placement: two columns to the right of the primary table if available; otherwise I1
+      if (enriched.primaryTable) {
         const table = enriched.primaryTable;
-        return {
-          row: table.position.startRow,
-          col: table.position.endCol + 2,
-          range: `${String.fromCharCode(65 + table.position.endCol + 2)}${
-            table.position.startRow + 1
-          }`,
-        };
+        const colIndex = table.position.endCol + 2;
+        const colLetter = String.fromCharCode(65 + Math.max(0, colIndex));
+        const range = `${colLetter}${table.position.startRow + 1}`;
+        return { row: table.position.startRow, col: colIndex, range };
       }
-
-      // Use spatial analysis for optimal placement
-      const optimalZone = spatialMap?.optimalPlacementZones?.[0];
-      if (optimalZone) {
-        return {
-          row: optimalZone.startRow,
-          col: optimalZone.startCol,
-          range: `${String.fromCharCode(65 + optimalZone.startCol)}${
-            optimalZone.startRow + 1
-          }`,
-        };
-      }
-
-      // Fallback
       return { row: 0, col: 8, range: "I1" };
     };
 
@@ -625,7 +636,7 @@ export async function debugUniversalContext(): Promise<void> {
         : null,
       calculableColumns: context.calculableColumns,
       cacheAge: Date.now() - context.lastUpdated,
-      spatialZones: context.spatialMap?.optimalPlacementZones?.length || 0,
+      // spatial zones removed
     });
   } catch (error) {
     console.error("❌ Context debug failed:", error);

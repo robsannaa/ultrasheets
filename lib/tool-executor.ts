@@ -28,7 +28,7 @@ export interface ToolDefinition {
   name: string;
   description: string;
   category: "data" | "format" | "analysis" | "structure" | "navigation";
-  requiredContext: ("tables" | "columns" | "spatial")[];
+  requiredContext: ("tables" | "columns")[];
   invalidatesCache: boolean;
 }
 
@@ -123,11 +123,7 @@ export abstract class UniversalTool {
             throw new Error("No columns found in the primary table.");
           }
           break;
-        case "spatial":
-          if (!context.spatialMap) {
-            throw new Error("Spatial analysis not available.");
-          }
-          break;
+        // spatial requirement removed
       }
     }
   }
@@ -232,18 +228,4 @@ export function createSimpleTool(
  */
 export function debugToolRegistry(): void {
   const tools = getRegisteredTools();
-
-  console.log("🔧 TOOL REGISTRY DEBUG:", {
-    totalTools: tools.length,
-    byCategory: tools.reduce((acc, tool) => {
-      acc[tool.category] = (acc[tool.category] || 0) + 1;
-      return acc;
-    }, {} as Record<string, number>),
-    tools: tools.map((tool) => ({
-      name: tool.name,
-      category: tool.category,
-      requirements: tool.requiredContext,
-      invalidatesCache: tool.invalidatesCache,
-    })),
-  });
 }

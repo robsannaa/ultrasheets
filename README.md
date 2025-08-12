@@ -159,6 +159,8 @@ User: "Create a chart showing sales by region"
 AI: Generates native Univer chart with proper data range
 ```
 
+<!-- Spatial Placement Zones docs removed as the feature is no longer used. -->
+
 ### Advanced Features
 
 ```

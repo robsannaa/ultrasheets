@@ -58,7 +58,7 @@ export interface EnhancedSheetContext {
     freeRows: number[];
     nextSafeColumn: string;
     nextSafeRow: number;
-  };
+  }; // kept minimal; no optimalPlacementZones
   intelligentSuggestions: {
     recommendedActions: string[];
     contextualHints: string[];
@@ -287,11 +287,6 @@ export function analyzeLiveSelectionData(
         "format_currency",
         "conditional_formatting"
       );
-    }
-
-    // Check for potential lookup scenarios
-    if (hasHeaders && values[0]?.length >= 2) {
-      suggestedOperations.push("vlookup_setup", "index_match_setup");
     }
 
     return {

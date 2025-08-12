@@ -164,8 +164,7 @@ ${lastChart ? `LAST_CHART:\n${JSON.stringify(lastChart, null, 2)}` : ""}${
       }${selectionContext}
 
 SMART GUIDANCE:
-- ALWAYS use the nextAvailableColumn from table context when adding columns to tables
-- When user wants to "add a column" to a table, place it in the nextAvailableColumn, not beyond
+- When adding a column to a table, ALWAYS place it immediately after the selected/primary data region's end column (derive from the region range, not guesses)
 - Respect table boundaries: table starts at startRow, not row 0
 - For table operations, use the actual table range (e.g., A5:E15), not A1-based ranges
 - If selection shows add_column intent, the user wants to extend the selected table
@@ -249,7 +248,7 @@ The get_workbook_snapshot tool now provides INTELLIGENT ANALYSIS for each sheet:
 - intelligence.tables[]: All detected tables with positions, headers, column types
 - intelligence.summary.calculableColumns[]: Pre-identified numeric/currency columns ready for totals
 - intelligence.summary.numericColumns[]: All numeric columns across tables
-- intelligence.spatialMap[]: Optimal placement zones for new content
+ - intelligence.spatialMap[]: [Removed] No longer used for placement
 - For "add totals" requests, use this intelligence to make smart decisions about which columns to total
 - For multi-table sheets, use tableId to target specific tables
 - Never guess column names - use the exact names from the intelligence analysis
@@ -433,9 +432,58 @@ Be professional, execute requests immediately, and provide specific insights bas
           },
         }),
 
+        get_sheet_context: tool({
+          description:
+            "Return the current workbook/sheet context that the client sent (including detected data regions and selection), so the model can decide precise tool args without extra client roundtrips.",
+          parameters: z.object({}),
+          execute: async () => {
+            try {
+              const ctx = workbookData || null;
+              const primaryRegionRange =
+                ctx?.cleanContext?.analysis?.dataRegions?.[0]?.range || null;
+              const nextCol = (() => {
+                try {
+                  if (!primaryRegionRange) return null;
+                  const m = primaryRegionRange.match(/([A-Z]+)\d+:([A-Z]+)\d+/);
+                  if (!m) return null;
+                  const end = m[2];
+                  const letterToIndex = (letters: string) =>
+                    [...letters.toUpperCase()].reduce(
+                      (acc, ch) => acc * 26 + (ch.charCodeAt(0) - 64),
+                      0
+                    ) - 1;
+                  const indexToLetter = (index: number) => {
+                    let n = index + 1,
+                      s = "";
+                    while (n > 0) {
+                      const rem = (n - 1) % 26;
+                      s = String.fromCharCode(65 + rem) + s;
+                      n = Math.floor((n - 1) / 26);
+                    }
+                    return s;
+                  };
+                  return indexToLetter(letterToIndex(end) + 1);
+                } catch {
+                  return null;
+                }
+              })();
+              return {
+                ok: true,
+                primaryRegionRange,
+                nextColumn: nextCol,
+                selection:
+                  ctx?.sheets?.find((s: any) => s.isActive)?.selection || null,
+                context: ctx,
+              };
+            } catch (e) {
+              return { ok: false, error: "No client context available" };
+            }
+          },
+        }),
+
         smart_add_column: tool({
           description:
-            "Add a column with optional per-row formula. Prefer specifying position explicitly: insertBefore, insertAfter, or between (e.g., 'between A and B' or 'before B').",
+            "Add a column with optional per-row formula. Placement is handled client-side: it will be inserted immediately after the active/primary data region.",
           parameters: z.object({
             columnName: z
               .string()
@@ -452,26 +500,6 @@ Be professional, execute requests immediately, and provide specific insights bas
               .union([z.string(), z.number()])
               .optional()
               .describe("Default value if no formula"),
-            // Position hints. The LLM should fill exactly one of these when the user asks for placement like 'between A and B' or 'before B'.
-            insertBefore: z
-              .union([z.string(), z.number()])
-              .optional()
-              .describe(
-                "Column letter, header text, or 1-based index to insert before"
-              ),
-            insertAfter: z
-              .union([z.string(), z.number()])
-              .optional()
-              .describe(
-                "Column letter, header text, or 1-based index to insert after"
-              ),
-            between: z
-              .array(z.union([z.string(), z.number()]))
-              .length(2)
-              .optional()
-              .describe(
-                "Two anchors (letters or headers) indicating insertion between them"
-              ),
           }),
           execute: async (params) => {
             return {
@@ -596,18 +624,26 @@ Be professional, execute requests immediately, and provide specific insights bas
               .describe("Cell where to write the VLOOKUP formula (e.g., 'F2')"),
             lookupValue: z
               .string()
-              .describe("Value to lookup - can be cell reference (e.g., 'A2') or literal value (e.g., 'Product1')"),
+              .describe(
+                "Value to lookup - can be cell reference (e.g., 'A2') or literal value (e.g., 'Product1')"
+              ),
             tableArray: z
               .string()
-              .describe("Table range for lookup (e.g., 'Sheet1!A:D' or 'A1:D10')"),
+              .describe(
+                "Table range for lookup (e.g., 'Sheet1!A:D' or 'A1:D10')"
+              ),
             colIndexNum: z
               .number()
-              .describe("Column number in table_array to return (1 = first column, 2 = second, etc.)"),
+              .describe(
+                "Column number in table_array to return (1 = first column, 2 = second, etc.)"
+              ),
             rangeLookup: z
               .boolean()
               .optional()
               .default(false)
-              .describe("FALSE for exact match (default), TRUE for approximate match"),
+              .describe(
+                "FALSE for exact match (default), TRUE for approximate match"
+              ),
           }),
           execute: async ({
             targetCell,
@@ -616,8 +652,10 @@ Be professional, execute requests immediately, and provide specific insights bas
             colIndexNum,
             rangeLookup = false,
           }) => {
-            const formula = `=VLOOKUP(${lookupValue},${tableArray},${colIndexNum},${rangeLookup ? "TRUE" : "FALSE"})`;
-            
+            const formula = `=VLOOKUP(${lookupValue},${tableArray},${colIndexNum},${
+              rangeLookup ? "TRUE" : "FALSE"
+            })`;
+
             return {
               message: `Creating VLOOKUP formula in ${targetCell}: ${formula}`,
               clientSideAction: {
@@ -818,11 +856,18 @@ Be professional, execute requests immediately, and provide specific insights bas
               .string()
               .describe("Destination top-left A1 cell, e.g., 'E1'")
               .default("A1"),
+            destSheetName: z
+              .string()
+              .optional()
+              .describe(
+                "Optional destination sheet name. If provided, data will be pasted into this sheet (created if missing)."
+              ),
             clearSource: z.boolean().optional().default(true),
           }),
           execute: async ({
             sourceRange,
             destStartCell,
+            destSheetName,
             clearSource = true,
           }) => {
             return {
@@ -831,6 +876,7 @@ Be professional, execute requests immediately, and provide specific insights bas
                 type: "moveRange",
                 sourceRange,
                 destStartCell,
+                destSheetName,
                 clearSource,
               },
               message: `Moved ${sourceRange} to ${destStartCell}`,
@@ -1258,7 +1304,14 @@ The tool intelligently detects the appropriate column and applies the filter cri
                 "Text that values should contain. Use for partial matching."
               ),
             condition: z
-              .enum(["greater_than", "less_than", "equals", "not_equals", "contains", "not_contains"])
+              .enum([
+                "greater_than",
+                "less_than",
+                "equals",
+                "not_equals",
+                "contains",
+                "not_contains",
+              ])
               .optional()
               .describe("Condition type for filtering."),
             conditionValue: z
@@ -1272,7 +1325,14 @@ The tool intelligently detects the appropriate column and applies the filter cri
                 "Optional table ID to target. If not specified, applies to the primary table."
               ),
           }),
-          execute: async ({ column, values, contains, condition, conditionValue, tableId }) => {
+          execute: async ({
+            column,
+            values,
+            contains,
+            condition,
+            conditionValue,
+            tableId,
+          }) => {
             return {
               message: `Filtering data${column ? ` in column ${column}` : ""}${
                 values ? ` to show: ${values.join(", ")}` : ""
@@ -1280,7 +1340,14 @@ The tool intelligently detects the appropriate column and applies the filter cri
               clientSideAction: {
                 type: "executeUniverTool",
                 toolName: "filter_data",
-                params: { column, values, contains, condition, conditionValue, tableId },
+                params: {
+                  column,
+                  values,
+                  contains,
+                  condition,
+                  conditionValue,
+                  tableId,
+                },
               },
             };
           },

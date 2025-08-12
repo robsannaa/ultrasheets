@@ -59,47 +59,20 @@ export interface IntelligentTable {
 
 export interface SheetAnalysis {
   tables: IntelligentTable[];
-  spatialMap: Array<{
-    usedRegions: string[];
-    largestEmptyArea: string;
-    optimalPlacementZones: Array<{
-      type: string;
-      tableId?: string;
-      position: string;
-      description: string;
-    }>;
-  }>;
-  crossTableRelationships: Array<{
-    type: string;
-    table1: string;
-    table2: string;
-    commonColumns?: string[];
-  }>;
 }
 
 export function analyzeSheetIntelligently(cellData: any): SheetAnalysis {
-  console.log("🔍 Starting intelligent sheet analysis...");
-  console.log("📊 Raw cellData structure:", {
-    hasData: !!cellData,
-    keys: Object.keys(cellData || {}),
-    firstRowData: cellData?.[0] || null,
-    sampleCells: Object.keys(cellData || {}).slice(0, 5).map(row => ({
-      row,
-      data: cellData[row]
-    }))
-  });
-
   // BULLETPROOF TABLE DETECTION
   // Layer 1: Standard intelligent detection
   const { maxRow, maxCol } = findDataBoundaries(cellData);
-  console.log(`📐 Data boundaries: maxRow=${maxRow}, maxCol=${maxCol}`);
-  
+
   let detectedTables = detectAllTableRegions(cellData, maxRow, maxCol);
-  console.log(`🔍 Standard detection found ${detectedTables.length} tables`);
 
   // Layer 2: Emergency fallback detection for obvious table structures
   if (detectedTables.length === 0) {
-    console.warn("⚠️ No tables found with standard detection, using emergency fallback");
+    console.warn(
+      "⚠️ No tables found with standard detection, using emergency fallback"
+    );
     detectedTables = emergencyTableDetection(cellData, maxRow, maxCol);
     console.log(`🚨 Emergency detection found ${detectedTables.length} tables`);
   }
@@ -108,17 +81,10 @@ export function analyzeSheetIntelligently(cellData: any): SheetAnalysis {
   if (detectedTables.length === 0 && maxRow >= 0 && maxCol >= 0) {
     console.warn("🆘 Using desperate fallback - creating table from all data");
     detectedTables = desperateFallbackTableCreation(cellData, maxRow, maxCol);
-    console.log(`💀 Desperate fallback created ${detectedTables.length} tables`);
+    console.log(
+      `💀 Desperate fallback created ${detectedTables.length} tables`
+    );
   }
-
-  console.log(`✅ Final table count: ${detectedTables.length}`);
-  detectedTables.forEach((table, idx) => {
-    console.log(`📋 Table ${idx + 1}:`, {
-      range: table.range,
-      headers: table.headers,
-      rowCount: table.rowCount
-    });
-  });
 
   const tables: IntelligentTable[] = detectedTables.map((table) => ({
     id: table.range, // Use range as ID to match chat route format (sheetIndex will be added later)
@@ -209,23 +175,7 @@ export function analyzeSheetIntelligently(cellData: any): SheetAnalysis {
     },
   }));
 
-  const spatialMap = [
-    {
-      usedRegions: tables.map((t) => t.range),
-      largestEmptyArea: findLargestEmptyArea(cellData, maxRow, maxCol, tables),
-      optimalPlacementZones: findOptimalPlacementZones(
-        cellData,
-        maxRow,
-        maxCol,
-        tables
-      ),
-    },
-  ];
-
-  const crossTableRelationships =
-    tables.length > 1 ? findCrossTableRelationships(tables) : [];
-
-  return { tables, spatialMap, crossTableRelationships };
+  return { tables };
 }
 
 // Helper functions
@@ -320,199 +270,247 @@ function detectAllTableRegions(cellData: any, maxRow: number, maxCol: number) {
 
 /**
  * EMERGENCY TABLE DETECTION - Bulletproof Fallback
- * 
+ *
  * This function uses aggressive pattern matching to find tables
  * even when the standard detection fails.
  */
-function emergencyTableDetection(cellData: any, maxRow: number, maxCol: number) {
+function emergencyTableDetection(
+  cellData: any,
+  maxRow: number,
+  maxCol: number
+) {
   console.log("🚨 Emergency table detection activated");
   const tables = [];
-  
+
   // Strategy 1: Look for any row with multiple consecutive non-empty text cells
-  for (let row = 0; row <= Math.min(maxRow, 20); row++) { // Check first 20 rows
+  for (let row = 0; row <= Math.min(maxRow, 20); row++) {
+    // Check first 20 rows
     const rowData = cellData[row] || {};
     const textCells = [];
-    
+
     for (let col = 0; col <= maxCol; col++) {
       const cell = rowData[col];
-      if (cell && cell.v && typeof cell.v === 'string' && cell.v.trim()) {
+      if (cell && cell.v && typeof cell.v === "string" && cell.v.trim()) {
         textCells.push({ col, value: cell.v.trim() });
       }
     }
-    
+
     if (textCells.length >= 2) {
       // Found potential header row - check for consecutive cells
       textCells.sort((a, b) => a.col - b.col);
-      
+
       let consecutiveGroup = [textCells[0]];
       for (let i = 1; i < textCells.length; i++) {
-        if (textCells[i].col === textCells[i-1].col + 1) {
+        if (textCells[i].col === textCells[i - 1].col + 1) {
           consecutiveGroup.push(textCells[i]);
         } else {
           if (consecutiveGroup.length >= 2) {
             // Found a valid header group
-            const table = buildEmergencyTable(cellData, row, consecutiveGroup, maxRow);
+            const table = buildEmergencyTable(
+              cellData,
+              row,
+              consecutiveGroup,
+              maxRow
+            );
             if (table) {
               tables.push(table);
-              console.log(`✅ Emergency detection found table at row ${row}:`, table.headers);
+              console.log(
+                `✅ Emergency detection found table at row ${row}:`,
+                table.headers
+              );
             }
           }
           consecutiveGroup = [textCells[i]];
         }
       }
-      
+
       // Check final group
       if (consecutiveGroup.length >= 2) {
-        const table = buildEmergencyTable(cellData, row, consecutiveGroup, maxRow);
+        const table = buildEmergencyTable(
+          cellData,
+          row,
+          consecutiveGroup,
+          maxRow
+        );
         if (table) {
           tables.push(table);
-          console.log(`✅ Emergency detection found table at row ${row}:`, table.headers);
+          console.log(
+            `✅ Emergency detection found table at row ${row}:`,
+            table.headers
+          );
         }
       }
     }
   }
-  
+
   return tables;
 }
 
 /**
  * Build table from emergency detection
  */
-function buildEmergencyTable(cellData: any, headerRow: number, headers: any[], maxRow: number) {
+function buildEmergencyTable(
+  cellData: any,
+  headerRow: number,
+  headers: any[],
+  maxRow: number
+) {
   const startCol = headers[0].col;
   const endCol = headers[headers.length - 1].col;
-  
+
   // Count data rows below header
   let dataRows = 0;
   let lastDataRow = headerRow;
-  
+
   for (let row = headerRow + 1; row <= maxRow; row++) {
     const rowData = cellData[row] || {};
     let hasAnyData = false;
-    
+
     // More lenient - any data in any column counts
     for (let col = startCol; col <= endCol; col++) {
       const cell = rowData[col];
-      if (cell && cell.v !== undefined && cell.v !== null && cell.v !== '') {
+      if (cell && cell.v !== undefined && cell.v !== null && cell.v !== "") {
         hasAnyData = true;
         break;
       }
     }
-    
+
     if (hasAnyData) {
       dataRows++;
       lastDataRow = row;
-    } else if (dataRows > 2) { // Need at least 2 data rows to stop
+    } else if (dataRows > 2) {
+      // Need at least 2 data rows to stop
       break;
     }
   }
-  
+
   if (dataRows === 0) return null;
-  
+
   const startColLetter = String.fromCharCode(65 + startCol);
   const endColLetter = String.fromCharCode(65 + endCol);
-  const range = `${startColLetter}${headerRow + 1}:${endColLetter}${lastDataRow + 1}`;
-  
+  const range = `${startColLetter}${headerRow + 1}:${endColLetter}${
+    lastDataRow + 1
+  }`;
+
   return {
     range,
     startRow: headerRow,
     endRow: lastDataRow,
     startCol,
     endCol,
-    headers: headers.map(h => h.value),
+    headers: headers.map((h) => h.value),
     rowCount: dataRows,
   };
 }
 
 /**
  * DESPERATE FALLBACK - Create table from any available data
- * 
+ *
  * This creates a basic table structure even if no clear headers are found.
  */
-function desperateFallbackTableCreation(cellData: any, maxRow: number, maxCol: number) {
+function desperateFallbackTableCreation(
+  cellData: any,
+  maxRow: number,
+  maxCol: number
+) {
   console.log("💀 Desperate fallback table creation activated");
-  
+
   // Find the first row with data and use it as headers
   for (let row = 0; row <= Math.min(maxRow, 10); row++) {
     const rowData = cellData[row] || {};
     const cellsInRow = [];
-    
+
     for (let col = 0; col <= maxCol; col++) {
       const cell = rowData[col];
-      if (cell && cell.v !== undefined && cell.v !== null && cell.v !== '') {
+      if (cell && cell.v !== undefined && cell.v !== null && cell.v !== "") {
         cellsInRow.push({
           col,
-          value: cell.v.toString().trim() || `Column ${String.fromCharCode(65 + col)}`
+          value:
+            cell.v.toString().trim() ||
+            `Column ${String.fromCharCode(65 + col)}`,
         });
       }
     }
-    
+
     if (cellsInRow.length >= 2) {
       // Use this as a header row and count data below
       let dataRows = 0;
       let lastDataRow = row;
-      
+
       for (let dataRow = row + 1; dataRow <= maxRow; dataRow++) {
         const dataRowData = cellData[dataRow] || {};
         let hasData = false;
-        
+
         for (const headerCell of cellsInRow) {
           const cell = dataRowData[headerCell.col];
-          if (cell && cell.v !== undefined && cell.v !== null && cell.v !== '') {
+          if (
+            cell &&
+            cell.v !== undefined &&
+            cell.v !== null &&
+            cell.v !== ""
+          ) {
             hasData = true;
             break;
           }
         }
-        
+
         if (hasData) {
           dataRows++;
           lastDataRow = dataRow;
         }
       }
-      
+
       if (dataRows > 0) {
-        const startCol = Math.min(...cellsInRow.map(c => c.col));
-        const endCol = Math.max(...cellsInRow.map(c => c.col));
+        const startCol = Math.min(...cellsInRow.map((c) => c.col));
+        const endCol = Math.max(...cellsInRow.map((c) => c.col));
         const startColLetter = String.fromCharCode(65 + startCol);
         const endColLetter = String.fromCharCode(65 + endCol);
-        const range = `${startColLetter}${row + 1}:${endColLetter}${lastDataRow + 1}`;
-        
+        const range = `${startColLetter}${row + 1}:${endColLetter}${
+          lastDataRow + 1
+        }`;
+
         console.log(`💀 Created desperate fallback table: ${range}`);
-        
-        return [{
-          range,
-          startRow: row,
-          endRow: lastDataRow,
-          startCol,
-          endCol,
-          headers: cellsInRow.map(c => c.value),
-          rowCount: dataRows,
-        }];
+
+        return [
+          {
+            range,
+            startRow: row,
+            endRow: lastDataRow,
+            startCol,
+            endCol,
+            headers: cellsInRow.map((c) => c.value),
+            rowCount: dataRows,
+          },
+        ];
       }
     }
   }
-  
+
   // Ultimate fallback - create generic table if ANY data exists
   if (maxRow >= 0 && maxCol >= 0) {
-    const range = `A1:${String.fromCharCode(65 + Math.min(maxCol, 25))}${Math.min(maxRow + 1, 100)}`;
+    const range = `A1:${String.fromCharCode(
+      65 + Math.min(maxCol, 25)
+    )}${Math.min(maxRow + 1, 100)}`;
     const headers = [];
     for (let col = 0; col <= Math.min(maxCol, 25); col++) {
       headers.push(`Column ${String.fromCharCode(65 + col)}`);
     }
-    
+
     console.log(`💀 Created ultimate fallback table: ${range}`);
-    
-    return [{
-      range,
-      startRow: 0,
-      endRow: Math.min(maxRow, 99),
-      startCol: 0,
-      endCol: Math.min(maxCol, 25),
-      headers,
-      rowCount: Math.min(maxRow + 1, 100),
-    }];
+
+    return [
+      {
+        range,
+        startRow: 0,
+        endRow: Math.min(maxRow, 99),
+        startCol: 0,
+        endCol: Math.min(maxCol, 25),
+        headers,
+        rowCount: Math.min(maxRow + 1, 100),
+      },
+    ];
   }
-  
+
   return [];
 }
 
@@ -863,64 +861,4 @@ function findLargestEmptyArea(
   return `${nextCol}${nextRow}`;
 }
 
-function findOptimalPlacementZones(
-  cellData: any,
-  maxRow: number,
-  maxCol: number,
-  tables: any[]
-) {
-  const zones = [];
-
-  for (const table of tables) {
-    if (table.spatial.canExpandRight) {
-      zones.push({
-        type: "right_of_table",
-        tableId: table.id,
-        position:
-          table.spatial.nextAvailableColumn + (table.position.startRow + 1),
-        description: `Right of ${table.id}`,
-      });
-    }
-
-    if (table.spatial.canExpandDown) {
-      zones.push({
-        type: "below_table",
-        tableId: table.id,
-        position:
-          String.fromCharCode(65 + table.position.startCol) +
-          (table.position.endRow + 2),
-        description: `Below ${table.id}`,
-      });
-    }
-  }
-
-  return zones;
-}
-
-function findCrossTableRelationships(tables: any[]) {
-  const relationships = [];
-
-  for (let i = 0; i < tables.length; i++) {
-    for (let j = i + 1; j < tables.length; j++) {
-      const table1 = tables[i];
-      const table2 = tables[j];
-
-      const commonColumns = table1.headers.filter((h1: string) =>
-        table2.headers.some(
-          (h2: string) => h1.toLowerCase() === h2.toLowerCase()
-        )
-      );
-
-      if (commonColumns.length > 0) {
-        relationships.push({
-          type: "shared_columns",
-          table1: table1.id,
-          table2: table2.id,
-          commonColumns,
-        });
-      }
-    }
-  }
-
-  return relationships;
-}
+// Removed findOptimalPlacementZones and cross-table relationship helpers
