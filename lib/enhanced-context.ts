@@ -38,7 +38,9 @@ export interface LiveSelectionData {
   values: any[][];
   formulas: string[][];
   displayValues: string[][];
-  cellData: any[][];
+  // Important: avoid raw getCellDatas() objects (contain circular DI refs);
+  // keep optional sanitized shape only if needed by future features
+  cellData?: any[][];
   isTableLike: boolean;
   hasHeaders: boolean;
   suggestedOperations: string[];
@@ -250,7 +252,13 @@ export function analyzeLiveSelectionData(
     const values = activeRange.getValues();
     const formulas = activeRange.getFormulas();
     const displayValues = activeRange.getDisplayValues();
-    const cellData = activeRange.getCellDatas();
+    // Do NOT include raw cell datas (circular refs via DI). If needed, sanitize.
+    // const rawCellDatas = activeRange.getCellDatas();
+    // const cellData = Array.isArray(rawCellDatas)
+    //   ? rawCellDatas.map((row: any[]) =>
+    //       row.map((cell: any) => (cell ? { v: cell.v, f: cell.f } : null))
+    //     )
+    //   : undefined;
 
     // Analyze if selection looks like a table
     const isTableLike = values.length > 1 && values[0]?.length > 1;
@@ -290,7 +298,7 @@ export function analyzeLiveSelectionData(
       values,
       formulas,
       displayValues,
-      cellData,
+      // cellData, // intentionally omitted to keep payload JSON-safe
       isTableLike,
       hasHeaders,
       suggestedOperations,
@@ -545,7 +553,25 @@ export function extractEnhancedWorkbookData(): {
     const sheets: EnhancedSheetContext[] = sheetOrder.map((sid) => {
       const s = sheetsData[sid];
       const name = s?.name || "Sheet";
-      const cellData = s?.cellData || {};
+      // Ensure JSON-safe copy of cellData (strip functions/DI refs)
+      const rawCellData = s?.cellData || {};
+      const cellData: Record<string, any> = {};
+      for (const r of Object.keys(rawCellData)) {
+        const row = rawCellData[r] || {};
+        const safeRow: Record<string, any> = {};
+        for (const c of Object.keys(row)) {
+          const cell = row[c];
+          if (cell && (typeof cell === "object" || typeof cell === "function")) {
+            // Keep only primitive fields used by detectors
+            const v = (cell as any).v;
+            const f = (cell as any).f;
+            safeRow[c] = { v, f };
+          } else {
+            safeRow[c] = cell;
+          }
+        }
+        cellData[r] = safeRow;
+      }
       const isActive = name === activeName;
 
       // Enhanced table detection
