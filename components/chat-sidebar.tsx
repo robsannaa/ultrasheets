@@ -715,11 +715,11 @@ export function ChatSidebar({ onMobileClose }: { onMobileClose?: () => void }) {
               // 🧠 SEMANTIC INTELLIGENCE: Auto-detect if this column needs a calculation
               let smartFormula = formulaPattern;
 
-              if (!smartFormula && targetRegion.semanticAnalysis) {
+              if (!smartFormula && (targetRegion as any).semanticAnalysis) {
                 // Look for matching calculation in semantic analysis
                 const matchingCalc =
-                  targetRegion.semanticAnalysis.possibleCalculations.find(
-                    (calc) =>
+                  (targetRegion as any).semanticAnalysis.possibleCalculations.find(
+                    (calc: any) =>
                       calc.newColumnName.toLowerCase() ===
                         columnName.toLowerCase() ||
                       columnName

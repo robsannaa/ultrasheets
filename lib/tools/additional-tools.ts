@@ -392,150 +392,164 @@ export const ConditionalFormattingTool = createSimpleTool(
     requiredContext: [],
     invalidatesCache: false,
   },
-  async (
-    context: UniversalToolContext,
-    params: {
-      range: string;
-      condition:
-        | "greater_than"
-        | "less_than"
-        | "equal_to"
-        | "between"
-        | "contains"
-        | "not_empty"
-        | "empty";
-      value?: number | string;
-      value2?: number; // For 'between' condition
-      format: {
-        backgroundColor?: string;
-        fontColor?: string;
-        bold?: boolean;
-        italic?: boolean;
-      };
-    }
-  ) => {
-    const { range, condition, value, value2, format } = params;
+  async (context: UniversalToolContext, params: any) => {
+    // Accept both our legacy schema and server tool schema
+    const range: string = params.range;
+    const incomingCondition: string | undefined = params.condition;
+    const ruleType: string | undefined = params.ruleType;
+    const format: any = params.format || {};
+    const contains: string | undefined = params.contains;
+    const startsWith: string | undefined = params.startsWith;
+    const endsWith: string | undefined = params.endsWith;
+    const min: number | undefined = params.min;
+    const max: number | undefined = params.max;
+    const equals: number | undefined = params.equals;
+    const formula: string | undefined = params.formula;
+    const value: any = params.value; // legacy
+    const value2: any = params.value2; // legacy
 
     if (!range) {
       throw new Error("Range is required for conditional formatting");
     }
+    // Infer rule
+    let inferredRule = ruleType || incomingCondition || "";
+    if (!inferredRule) {
+      if (typeof formula === "string" && formula.trim())
+        inferredRule = "formula";
+      else if (typeof contains === "string") inferredRule = "text_contains";
+      else if (typeof startsWith === "string")
+        inferredRule = "text_starts_with";
+      else if (typeof endsWith === "string") inferredRule = "text_ends_with";
+      else if (typeof min === "number" && typeof max === "number")
+        inferredRule = "number_between";
+      else if (typeof min === "number") inferredRule = "number_gt";
+      else if (typeof max === "number") inferredRule = "number_lt";
+      else if (typeof equals === "number") inferredRule = "number_eq";
+      else inferredRule = "not_empty";
+    }
 
-    console.log(`🎨 Creating conditional formatting rule for range: ${range}`);
-    console.log(`🎨 Condition: ${condition}, Value: ${value}, Format:`, format);
+    // Parse range
+    const m = range.match(/([A-Z]+)(\d+):([A-Z]+)(\d+)/);
+    if (!m) throw new Error(`Invalid range format: ${range}`);
+    const [, startColStr, startRowStr, endColStr, endRowStr] = m;
+    const colToIndex = (s: string) =>
+      s.split("").reduce((acc, ch) => acc * 26 + (ch.charCodeAt(0) - 64), 0) -
+      1;
+    const startRowIndex = parseInt(startRowStr, 10) - 1;
+    const endRowIndex = parseInt(endRowStr, 10) - 1;
+    const startColIndex = colToIndex(startColStr);
+    const endColIndex = colToIndex(endColStr);
 
-    // Parse range to get coordinates for conditional formatting
-      const rangeMatch = range.match(/([A-Z]+)(\d+):([A-Z]+)(\d+)/);
-      if (!rangeMatch) {
-        throw new Error(`Invalid range format: ${range}`);
-      }
+    // Build rule per docs [Conditional Formatting Facade API]
+    // https://docs.univer.ai/guides/sheets/features/conditional-formatting
+    let rule = context.fWorksheet.newConditionalFormattingRule().setRanges([
+      {
+        startRow: startRowIndex,
+        endRow: endRowIndex,
+        startColumn: startColIndex,
+        endColumn: endColIndex,
+      },
+    ]);
 
-      const [, startCol, startRow, endCol, endRow] = rangeMatch;
-      const startRowIndex = parseInt(startRow) - 1;
-      const endRowIndex = parseInt(endRow) - 1;
-      const startColIndex =
-        startCol
-          .split("")
-          .reduce((acc, char) => acc * 26 + (char.charCodeAt(0) - 64), 0) - 1;
-      const endColIndex =
-        endCol
-          .split("")
-          .reduce((acc, char) => acc * 26 + (char.charCodeAt(0) - 64), 0) - 1;
+    switch (inferredRule) {
+      case "number_between":
+        if (typeof min === "number" && typeof max === "number")
+          rule = rule.whenNumberBetween(Math.min(min, max), Math.max(min, max));
+        else throw new Error("number_between requires min and max");
+        break;
+      case "number_gt":
+        if (typeof min === "number") rule = rule.whenNumberGreaterThan(min);
+        else throw new Error("number_gt requires min");
+        break;
+      case "number_gte":
+        if (typeof min === "number")
+          rule = rule.whenNumberGreaterThanOrEqualTo(min);
+        else throw new Error("number_gte requires min");
+        break;
+      case "number_lt":
+        if (typeof max === "number") rule = rule.whenNumberLessThan(max);
+        else throw new Error("number_lt requires max");
+        break;
+      case "number_lte":
+        if (typeof max === "number")
+          rule = rule.whenNumberLessThanOrEqualTo(max);
+        else throw new Error("number_lte requires max");
+        break;
+      case "number_eq":
+        if (typeof equals === "number") rule = rule.whenNumberEqualTo(equals);
+        else throw new Error("number_eq requires equals");
+        break;
+      case "number_neq":
+        if (typeof equals === "number")
+          rule = rule.whenNumberNotEqualTo(equals);
+        else throw new Error("number_neq requires equals");
+        break;
+      case "text_contains":
+        if (typeof contains === "string")
+          rule = rule.whenTextContains(contains);
+        else throw new Error("text_contains requires 'contains'");
+        break;
+      case "text_not_contains":
+        if (typeof contains === "string")
+          rule = rule.whenTextDoesNotContain(contains);
+        else throw new Error("text_not_contains requires 'contains'");
+        break;
+      case "text_starts_with":
+        if (typeof startsWith === "string")
+          rule = rule.whenTextStartsWith(startsWith);
+        else throw new Error("text_starts_with requires 'startsWith'");
+        break;
+      case "text_ends_with":
+        if (typeof endsWith === "string")
+          rule = rule.whenTextEndsWith(endsWith);
+        else throw new Error("text_ends_with requires 'endsWith'");
+        break;
+      case "not_empty":
+        rule = rule.whenCellNotEmpty();
+        break;
+      case "empty":
+        rule = rule.whenCellEmpty();
+        break;
+      case "formula":
+        if (typeof formula === "string" && formula.trim())
+          rule = rule.whenFormulaSatisfied(formula);
+        else throw new Error("formula rule requires 'formula' string");
+        break;
+      case "unique":
+        rule = rule.setUniqueValues();
+        break;
+      case "duplicate":
+        rule = rule.setDuplicateValues();
+        break;
+      case "data_bar":
+        rule = rule.setDataBar();
+        break;
+      case "color_scale":
+        rule = rule.setColorScale();
+        break;
+      default:
+        throw new Error(`Unsupported ruleType: ${inferredRule}`);
+    }
 
-      // Create a new conditional formatting rule using Univer.js CF API
-      let rule = context.fWorksheet.newConditionalFormattingRule();
+    // Apply formatting attributes
+    if (format.backgroundColor)
+      rule = rule.setBackground(format.backgroundColor);
+    if (format.fontColor) rule = rule.setFontColor(format.fontColor);
+    if (format.bold) rule = rule.setBold(true);
+    if (format.italic) rule = rule.setItalic(true);
 
-      // Set the range for the rule using FRange object
-      const fRange = context.fWorksheet.getRange(range);
-      rule = rule.setRanges([fRange.getRange()]);
+    const builtRule = rule.build();
+    const ruleId = context.fWorksheet.addConditionalFormattingRule(builtRule);
 
-      // Apply the condition based on type
-      switch (condition) {
-        case "greater_than":
-          if (typeof value === "number") {
-            rule = rule.whenNumberGreaterThan(value);
-          } else {
-            throw new Error("greater_than condition requires a numeric value");
-          }
-          break;
-        case "less_than":
-          if (typeof value === "number") {
-            rule = rule.whenNumberLessThan(value);
-          } else {
-            throw new Error("less_than condition requires a numeric value");
-          }
-          break;
-        case "equal_to":
-          if (typeof value === "number") {
-            rule = rule.whenNumberEqualTo(value);
-          } else if (typeof value === "string") {
-            rule = rule.whenTextEqualTo(value);
-          } else {
-            throw new Error("equal_to condition requires a value");
-          }
-          break;
-        case "between":
-          if (typeof value === "number" && typeof value2 === "number") {
-            rule = rule.whenNumberBetween(
-              Math.min(value, value2),
-              Math.max(value, value2)
-            );
-          } else {
-            throw new Error("between condition requires two numeric values");
-          }
-          break;
-        case "contains":
-          if (typeof value === "string") {
-            rule = rule.whenTextContains(value);
-          } else {
-            throw new Error("contains condition requires a string value");
-          }
-          break;
-        case "not_empty":
-          rule = rule.whenCellNotEmpty();
-          break;
-        case "empty":
-          rule = rule.whenCellEmpty();
-          break;
-        default:
-          throw new Error(`Unsupported condition: ${condition}`);
-      }
-
-      // Apply formatting to the rule
-      if (format.backgroundColor) {
-        rule = rule.setBackground(format.backgroundColor);
-        console.log(`🎨 Applied background color: ${format.backgroundColor}`);
-      }
-      if (format.fontColor) {
-        rule = rule.setFontColor(format.fontColor);
-        console.log(`🎨 Applied font color: ${format.fontColor}`);
-      }
-      if (format.bold) {
-        rule = rule.setBold(true);
-        console.log(`🎨 Applied bold formatting`);
-      }
-      if (format.italic) {
-        rule = rule.setItalic(true);
-        console.log(`🎨 Applied italic formatting`);
-      }
-
-      // Build and apply the rule
-      const builtRule = rule.build();
-      console.log(`🎨 Built conditional formatting rule:`, builtRule);
-
-      // Apply the rule to the worksheet
-      const ruleId = context.fWorksheet.addConditionalFormattingRule(builtRule);
-      console.log(`🎨 Applied conditional formatting rule with ID: ${ruleId}`);
-
-      return {
-        success: true,
-        range,
-        condition,
-        conditionValue: value,
-        conditionValue2: value2,
-        format,
-        ruleId,
-        message: `Applied conditional formatting rule to ${range} based on '${condition}' condition using Univer.js CF API`,
-      };
+    return {
+      success: true,
+      range,
+      ruleType: inferredRule,
+      inputs: { min, max, equals, contains, startsWith, endsWith, formula },
+      format,
+      ruleId,
+      message: `Applied conditional formatting to ${range} using '${inferredRule}'`,
+    };
   }
 );
 
