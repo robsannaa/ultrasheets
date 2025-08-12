@@ -582,67 +582,53 @@ export const ConditionalFormattingTool = createSimpleTool(
     const fRange = context.fWorksheet.getRange(range);
     if (typeof (rule as any).setRanges === "function") {
       try {
-        rule = (rule as any).setRanges([fRange]);
+        // Per docs, pass IRangeData via getRange()
+        rule = (rule as any).setRanges([ (fRange as any).getRange() ]);
       } catch {}
     }
     const builtRule = rule.build();
 
-    // Apply rule using robust signature attempts, preferring Range API
-    let ruleId: any = undefined;
-    let applied = false;
+    // Ensure ranges exist on the final rule (older builds may ignore setRanges)
+    const rawRange = (fRange as any).getRange ? (fRange as any).getRange() : undefined;
+    const finalRule = rawRange && !(builtRule as any)?.ranges?.length
+      ? { ...(builtRule as any), ranges: [rawRange] }
+      : builtRule;
+
+    // Apply exactly as in docs: worksheet.addConditionalFormattingRule(rule)
     const ws: any = context.fWorksheet as any;
-    try {
-      if (typeof (fRange as any).addConditionalFormattingRule === "function") {
-        ruleId = (fRange as any).addConditionalFormattingRule(builtRule);
-        applied = true;
+    if (typeof ws.addConditionalFormattingRule === "function") {
+      try {
+        const ruleId = ws.addConditionalFormattingRule(finalRule);
+        return {
+          success: true,
+          range,
+          ruleType: inferredRule,
+          inputs: { min, max, equals, contains, startsWith, endsWith, formula },
+          format: effectiveFormat,
+          ruleId,
+          message: `Applied conditional formatting to ${range} using '${inferredRule}'`,
+        };
+      } catch (err) {
+        // Fall through to secondary API
       }
-    } catch {}
-    if (!applied) {
-      try {
-        if (typeof ws.addConditionalFormattingRule === "function") {
-          // Try common signatures
-          try {
-            ruleId = ws.addConditionalFormattingRule(fRange, builtRule);
-            applied = true;
-          } catch {}
-          if (!applied) {
-            try {
-              ruleId = ws.addConditionalFormattingRule(builtRule, fRange);
-              applied = true;
-            } catch {}
-          }
-          if (!applied) {
-            try {
-              ruleId = ws.addConditionalFormattingRule(builtRule);
-              applied = true;
-            } catch {}
-          }
-        }
-      } catch {}
-    }
-    if (!applied) {
-      try {
-        if (typeof ws.setConditionalFormattingRule === "function") {
-          ruleId = ws.setConditionalFormattingRule(builtRule);
-          applied = true;
-        }
-      } catch {}
-    }
-    if (!applied) {
-      throw new Error(
-        "Failed to apply conditional formatting rule using available APIs"
-      );
     }
 
-    return {
-      success: true,
-      range,
-      ruleType: inferredRule,
-      inputs: { min, max, equals, contains, startsWith, endsWith, formula },
-      format: effectiveFormat,
-      ruleId,
-      message: `Applied conditional formatting to ${range} using '${inferredRule}'`,
-    };
+    if (typeof ws.setConditionalFormattingRule === "function") {
+      const res = ws.setConditionalFormattingRule((finalRule as any).cfId, finalRule);
+      return {
+        success: true,
+        range,
+        ruleType: inferredRule,
+        inputs: { min, max, equals, contains, startsWith, endsWith, formula },
+        format: effectiveFormat,
+        ruleId: (finalRule as any).cfId ?? res,
+        message: `Applied conditional formatting (set) to ${range} using '${inferredRule}'`,
+      };
+    }
+
+    throw new Error("Conditional formatting API not available in this Univer build");
+
+    // (Unreached)
   }
 );
 
