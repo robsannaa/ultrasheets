@@ -6,12 +6,13 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { Send, Loader2, CheckCircle2, Wrench } from "lucide-react";
+import { Send, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { applyFormatting } from "@/lib/univer-helpers";
 import { useChat } from "ai/react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { ToolBadge } from "./ToolBadge";
 
 function ChatMessages({
   messages,
@@ -33,45 +34,8 @@ function ChatMessages({
     }
   }, [messages]);
 
-  // Merge adjacent assistant messages with identical text to avoid repeated blocks
-  const mergedMessages = React.useMemo(() => {
-    const result: any[] = [];
-    const normalize = (s: string) => (s || "").replace(/\s+/g, " ").trim();
-    const getText = (m: any) => {
-      if (Array.isArray(m.parts)) {
-        try {
-          return m.parts
-            .filter((p: any) => p.type === "text" && typeof p.text === "string")
-            .map((p: any) => p.text)
-            .join("");
-        } catch {
-          return m.content || "";
-        }
-      }
-      return m.content || "";
-    };
-
-    for (const m of messages) {
-      if (
-        result.length > 0 &&
-        m.role === "assistant" &&
-        result[result.length - 1].role === "assistant"
-      ) {
-        const prev = result[result.length - 1];
-        if (normalize(getText(prev)) === normalize(getText(m))) {
-          // merge tool parts; keep one text block
-          const merged = {
-            ...prev,
-            parts: [...(prev.parts || []), ...(m.parts || [])],
-          };
-          result[result.length - 1] = merged;
-          continue;
-        }
-      }
-      result.push(m);
-    }
-    return result;
-  }, [messages]);
+  // Use messages as-is; no de-duplication of adjacent assistant frames
+  const mergedMessages = messages;
 
   // Show all assistant text output without aggressive de-duplication
 
@@ -346,7 +310,8 @@ export function ChatSidebar({ onMobileClose }: { onMobileClose?: () => void }) {
                 ...extracted,
                 // ultraActionLog is populated by client-side tool executions
                 recentActions:
-                  typeof window !== "undefined" && (window as any).ultraActionLog
+                  typeof window !== "undefined" &&
+                  (window as any).ultraActionLog
                     ? (window as any).ultraActionLog
                     : [],
               };
@@ -355,7 +320,8 @@ export function ChatSidebar({ onMobileClose }: { onMobileClose?: () => void }) {
               return {
                 sheets: [],
                 recentActions:
-                  typeof window !== "undefined" && (window as any).ultraActionLog
+                  typeof window !== "undefined" &&
+                  (window as any).ultraActionLog
                     ? (window as any).ultraActionLog
                     : [],
               };
@@ -928,7 +894,7 @@ export function ChatSidebar({ onMobileClose }: { onMobileClose?: () => void }) {
         )}
       </div>
 
-      <div className={`${onMobileClose ? "p-3" : "px-3 py-3"}`}>
+      <div className={`${onMobileClose ? "p-3" : "px-3 py-3"} border-t`}>
         <ChatInput
           input={input}
           handleInputChange={handleInputChange}
@@ -994,34 +960,6 @@ function CollapsibleMarkdown({ text }: { text: string }) {
           {expanded ? "Show less" : "Show details"}
         </button>
       )}
-    </div>
-  );
-}
-function ToolBadge({
-  label,
-  toolName,
-  state,
-}: {
-  label: string;
-  toolName?: string;
-  state: "call" | "result" | "error";
-}) {
-  const isRunning = state === "call";
-  return (
-    <div className="my-0.5">
-      <div
-        className={cn(
-          "inline-flex items-center gap-1.5 text-xs rounded-md px-2 py-1 max-w-full break-words whitespace-normal",
-          isRunning ? "bg-blue-50 text-blue-700" : "bg-green-50 text-green-700"
-        )}
-      >
-        {isRunning ? (
-          <Loader2 className="h-3 w-3 animate-spin shrink-0" />
-        ) : (
-          <CheckCircle2 className="h-3 w-3 shrink-0" />
-        )}
-        <span className="truncate text-xs font-medium">{label}</span>
-      </div>
     </div>
   );
 }
