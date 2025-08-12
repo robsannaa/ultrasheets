@@ -2,12 +2,12 @@
 
 import { useEffect, useRef } from "react";
 import { useTheme } from "next-themes";
+// CSS imports are safe to keep at module level
 import "@univerjs/preset-sheets-core/lib/index.css";
 import "@univerjs/preset-sheets-drawing/lib/index.css";
 import "@univerjs/preset-sheets-advanced/lib/index.css";
 import "@univerjs/preset-sheets-conditional-formatting/lib/index.css";
-// Enable formula facade API (VLOOKUP/INDEX/MATCH and 500+ functions)
-import "@univerjs/sheets-formula/facade";
+import "@univerjs/preset-sheets-sort/lib/index.css";
 
 // Global tool execution handler
 declare global {
@@ -27,8 +27,43 @@ export function Univer() {
   const { resolvedTheme } = useTheme();
 
   useEffect(() => {
+    // Suppress Univer's duplicate identifier warnings during development
+    const originalError = console.error;
+    const originalWarn = console.warn;
+
+    console.error = (...args) => {
+      const message = args.join(" ");
+      if (
+        message.includes("Identifier") &&
+        message.includes("already exists")
+      ) {
+        return; // Suppress these specific errors
+      }
+      originalError.apply(console, args);
+    };
+
+    console.warn = (...args) => {
+      const message = args.join(" ");
+      if (
+        message.includes("Identifier") &&
+        message.includes("already exists")
+      ) {
+        return; // Suppress these specific warnings
+      }
+      originalWarn.apply(console, args);
+    };
+
     // Dynamic imports to avoid SSR issues
     const initializeUniver = async () => {
+      // Import facade APIs conditionally to prevent duplicate service registration
+      if (!window.__ultraUniverInitialized) {
+        try {
+          await import("@univerjs/sheets-formula/facade");
+          await import("@univerjs/sheets-sort/facade");
+        } catch (e) {
+          console.warn("Facade imports failed:", e);
+        }
+      }
       const { UniverSheetsCorePreset } = await import(
         "@univerjs/preset-sheets-core"
       );
@@ -77,7 +112,7 @@ export function Univer() {
         defaultTheme,
         greenTheme,
       } = await import("@univerjs/presets");
-      const { LifecycleStages } = await import("@univerjs/core");
+      // LifecycleStages import removed; no lifecycle hook needed
 
       // Try to import filter preset, fallback if it fails
       let filterPreset = null;
@@ -93,6 +128,24 @@ export function Univer() {
       } catch (error) {
         console.warn(
           "⚠️ Filter preset not available, continuing without filters:",
+          error
+        );
+      }
+
+      // Try to import sort preset, fallback if it fails
+      let sortPreset = null;
+      let sortLocales = null;
+      try {
+        const sortModule = await import("@univerjs/preset-sheets-sort");
+        const sortLocaleModule = await import(
+          "@univerjs/preset-sheets-sort/locales/en-US"
+        );
+        sortPreset = sortModule.UniverSheetsSortPreset;
+        sortLocales = sortLocaleModule.default;
+        console.log("✅ Sort preset loaded successfully");
+      } catch (error) {
+        console.warn(
+          "⚠️ Sort preset not available, continuing without sorting:",
           error
         );
       }
@@ -127,36 +180,41 @@ export function Univer() {
       if (filterPreset) {
         presets.push(filterPreset());
       }
+      // Add sort preset if available
+      if (sortPreset) {
+        presets.push(sortPreset());
+      }
       if (TablePreset) {
         presets.push(TablePreset());
       }
 
       let locales = mergeLocales(sheetsCoreEnUS);
       try {
-        locales = filterLocales
-          ? mergeLocales(
-              sheetsCoreEnUS,
-              sheetsDrawingEnUS,
-              sheetsAdvancedEnUS,
-              sheetsCFEnUS,
-              filterLocales,
-              tableLocales || {}
-            )
-          : mergeLocales(
-              sheetsCoreEnUS,
-              sheetsDrawingEnUS,
-              sheetsAdvancedEnUS,
-              sheetsCFEnUS,
-              tableLocales || {}
-            );
+        const additionalLocales = [
+          ...(filterLocales ? [filterLocales] : []),
+          ...(sortLocales ? [sortLocales] : []),
+          ...(tableLocales ? [tableLocales] : [{}]),
+        ];
+
+        locales = mergeLocales(
+          sheetsCoreEnUS,
+          sheetsDrawingEnUS,
+          sheetsAdvancedEnUS,
+          sheetsCFEnUS,
+          ...additionalLocales
+        );
       } catch (e) {
         console.warn(
           "⚠️ Failed to merge locales for chart presets; using core locales only.",
           e
         );
-        locales = filterLocales
-          ? mergeLocales(sheetsCoreEnUS, filterLocales, tableLocales || {})
-          : mergeLocales(sheetsCoreEnUS, tableLocales || {});
+        const additionalLocales = [
+          ...(filterLocales ? [filterLocales] : []),
+          ...(sortLocales ? [sortLocales] : []),
+          ...(tableLocales ? [tableLocales] : [{}]),
+        ];
+
+        locales = mergeLocales(sheetsCoreEnUS, ...additionalLocales);
       }
 
       // Helper: remove Univer watermark across API variants
@@ -166,6 +224,14 @@ export function Univer() {
           if (typeof api?.removeWatermark === "function") api.removeWatermark();
           if (typeof api?.deleteWatermark === "function") api.deleteWatermark();
           if (typeof api?.hideWatermark === "function") api.hideWatermark();
+
+          // Try internal watermark removal methods
+          if (api?._watermarkService?.removeWatermark) {
+            api._watermarkService.removeWatermark();
+          }
+          if (api?._univerInstance?._watermarkService?.removeWatermark) {
+            api._univerInstance._watermarkService.removeWatermark();
+          }
 
           // CSS-based watermark removal as fallback
           const removeWatermarkCSS = () => {
@@ -178,20 +244,41 @@ export function Univer() {
               ".univer-brand",
               'div[style*="watermark"]',
               'div[style*="univer"]',
+              // More aggressive selectors
+              '*[style*="opacity: 0.1"]',
+              '*[style*="opacity: 0.2"]',
+              '*[style*="opacity: 0.3"]',
+              'svg[class*="watermark"]',
+              'canvas[class*="watermark"]',
             ];
 
             watermarkSelectors.forEach((selector) => {
-              const elements = document.querySelectorAll(selector);
-              elements.forEach((el) => {
-                if (el instanceof HTMLElement) {
-                  el.style.display = "none";
-                  el.remove();
-                }
-              });
+              try {
+                const elements = document.querySelectorAll(selector);
+                elements.forEach((el) => {
+                  if (el instanceof HTMLElement) {
+                    // Check if element contains watermark text
+                    const hasWatermarkText =
+                      el.textContent?.toLowerCase().includes("univer") ||
+                      el.innerHTML?.toLowerCase().includes("univer");
+
+                    if (
+                      hasWatermarkText ||
+                      el.className.toLowerCase().includes("watermark") ||
+                      el.getAttribute("data-watermark")
+                    ) {
+                      el.style.display = "none";
+                      el.remove();
+                    }
+                  }
+                });
+              } catch (e) {
+                // Ignore selector errors
+              }
             });
           };
 
-          // Apply CSS removal immediately and on DOM changes
+          // Apply CSS removal method
           removeWatermarkCSS();
 
           // Set up observer for dynamic watermark removal
@@ -248,36 +335,7 @@ export function Univer() {
         theme: resolvedTheme === "dark" ? greenTheme : defaultTheme,
       });
 
-      // Remove Univer watermark if API available
-      try {
-        removeUniverWatermark(univerAPI);
-      } catch {}
-
-      // Force initial formula computing at lifecycle Starting for future workbooks
-      try {
-        if (!window.__ultraUniverLifecycleHookAdded) {
-          univerAPI.addEvent(
-            univerAPI.Event.LifeCycleChanged,
-            ({ stage }: { stage: any }) => {
-              if (stage === LifecycleStages.Starting) {
-                const formula = univerAPI.getFormula();
-                formula.setInitialFormulaComputing(CalculationMode.FORCED);
-              }
-              // Re-assert watermark removal on lifecycle transitions
-              try {
-                removeUniverWatermark(univerAPI);
-              } catch {}
-            }
-          );
-          window.__ultraUniverLifecycleHookAdded = true;
-        }
-        // Sync dark mode on mount and when theme changes
-        try {
-          if (typeof univerAPI.toggleDarkMode === "function") {
-            univerAPI.toggleDarkMode(resolvedTheme === "dark");
-          }
-        } catch {}
-      } catch {}
+      // Lifecycle hook removed: initial formula computing already forced via preset config
 
       // Create workbook
       univerAPI.createWorkbook({});
@@ -337,6 +395,28 @@ export function Univer() {
     };
 
     initializeUniver().catch(console.error);
+
+    // Cleanup function to prevent issues during HMR
+    return () => {
+      try {
+        // Restore original console functions
+        console.error = originalError;
+        console.warn = originalWarn;
+        
+        // Clean up observer
+        if (window.__univerWatermarkObserver) {
+          window.__univerWatermarkObserver.disconnect();
+          window.__univerWatermarkObserver = undefined;
+        }
+
+        // Reset lifecycle hook flag to allow re-registration
+        if (window.__ultraUniverLifecycleHookAdded) {
+          window.__ultraUniverLifecycleHookAdded = false;
+        }
+      } catch (e) {
+        originalWarn("Cleanup warning:", e);
+      }
+    };
   }, []);
 
   // Sync Univer dark mode when the app theme changes (including reuse path)
@@ -359,9 +439,17 @@ export function Univer() {
           if (typeof api?.removeWatermark === "function") api.removeWatermark();
           if (typeof api?.deleteWatermark === "function") api.deleteWatermark();
           if (typeof api?.hideWatermark === "function") api.hideWatermark();
+
+          // Try internal watermark removal methods
+          if (api?._watermarkService?.removeWatermark) {
+            api._watermarkService.removeWatermark();
+          }
+          if (api?._univerInstance?._watermarkService?.removeWatermark) {
+            api._univerInstance._watermarkService.removeWatermark();
+          }
         }
 
-        // CSS-based removal
+        // CSS-based removal with enhanced selectors
         const watermarkSelectors = [
           '[class*="watermark"]',
           '[class*="univer-watermark"]',
@@ -371,23 +459,43 @@ export function Univer() {
           ".univer-brand",
           'div[style*="watermark"]',
           'div[style*="univer"]',
+          '*[style*="opacity: 0.1"]',
+          '*[style*="opacity: 0.2"]',
+          '*[style*="opacity: 0.3"]',
+          'svg[class*="watermark"]',
+          'canvas[class*="watermark"]',
         ];
 
         watermarkSelectors.forEach((selector) => {
-          const elements = document.querySelectorAll(selector);
-          elements.forEach((el) => {
-            if (el instanceof HTMLElement) {
-              el.style.display = "none";
-              el.remove();
-            }
-          });
+          try {
+            const elements = document.querySelectorAll(selector);
+            elements.forEach((el) => {
+              if (el instanceof HTMLElement) {
+                // Check if element contains watermark text
+                const hasWatermarkText =
+                  el.textContent?.toLowerCase().includes("univer") ||
+                  el.innerHTML?.toLowerCase().includes("univer");
+
+                if (
+                  hasWatermarkText ||
+                  el.className.toLowerCase().includes("watermark") ||
+                  el.getAttribute("data-watermark")
+                ) {
+                  el.style.display = "none";
+                  el.remove();
+                }
+              }
+            });
+          } catch (e) {
+            // Ignore selector errors
+          }
         });
       } catch {}
     };
 
     // Run immediately and set up interval
     removeWatermarks();
-    const interval = setInterval(removeWatermarks, 2000);
+    const interval = setInterval(removeWatermarks, 1000); // More frequent checks
 
     return () => clearInterval(interval);
   }, []);
