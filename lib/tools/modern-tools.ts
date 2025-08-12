@@ -28,7 +28,19 @@ export const AddSmartTotalsTool = createSimpleTool(
     context: UniversalToolContext,
     params: { columns?: string[]; tableId?: string }
   ) => {
-    const table = context.findTable(params.tableId);
+    // Resolve table robustly: accept explicit id, A1 range, or fallback to primary/first table
+    let table = context.findTable(params.tableId);
+    if (!table && params.tableId) {
+      const id = params.tableId;
+      // If id is like "0:0", map to first table
+      if (/^\d+:0$/.test(id) && context.tables.length > 0) {
+        table = context.tables[0];
+      } else if (/^\d+:[A-Z]+\d+:[A-Z]+\d+$/i.test(id)) {
+        // If id looks like "0:A1:D6", try to match by range suffix
+        const suffix = id.split(":").slice(1).join(":");
+        table = context.tables.find((t) => t.range === suffix) || null as any;
+      }
+    }
     if (!table) {
       throw new Error(`Table ${params.tableId || "primary"} not found`);
     }
@@ -166,9 +178,7 @@ export const AddFilterTool = createSimpleTool(
       }
 
       throw new Error(
-        `Table ${
-          params.tableId || "primary"
-        } not found. Available tables: ${context.tables
+        `Table ${params.tableId || "primary"} not found. Available tables: ${context.tables
           .map((t) => t.id)
           .join(", ")}`
       );
