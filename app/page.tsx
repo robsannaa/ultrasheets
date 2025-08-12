@@ -88,13 +88,13 @@ export default function Home() {
       <div className="bg-background h-screen w-screen border-0 m-1">
         <ResizablePanelGroup direction="horizontal">
           <ResizablePanel
-            defaultSize={82}
+            defaultSize={70}
             minSize={60}
             className="my-1 mx-1 border rounded-2xl"
           >
             <Univer />
           </ResizablePanel>
-          <ResizableHandle withHandle />
+          <ResizableHandle withHandle className="border-0" />
           <ResizablePanel defaultSize={30} minSize={15} maxSize={40}>
             <ChatSidebar />
           </ResizablePanel>

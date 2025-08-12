@@ -327,6 +327,8 @@ export function ChatSidebar({ onMobileClose }: { onMobileClose?: () => void }) {
 
   // Keep track of executed tool invocations to avoid duplicate runs during streaming updates
   const executedToolCallIdsRef = React.useRef<Set<string>>(new Set());
+  // Semantic deduplication based on tool + parameters to prevent multiple identical calls
+  const recentExecutionsRef = React.useRef<Map<string, number>>(new Map());
 
   // Listen for tool results and execute them on the frontend
   useEffect(() => {
@@ -347,6 +349,32 @@ export function ChatSidebar({ onMobileClose }: { onMobileClose?: () => void }) {
           if (!result || !result.clientSideAction) continue;
 
           const action = result.clientSideAction;
+          
+          // SMART deduplication: prevent IDENTICAL tool calls (same params) within rapid succession
+          if (action.type === "executeUniverTool") {
+            const semanticKey = `${action.toolName}:${JSON.stringify(action.params)}`;
+            const now = Date.now();
+            const lastExecution = recentExecutionsRef.current.get(semanticKey);
+            
+            // Only block if IDENTICAL parameters within rapid timeframe (likely accidental duplicates)
+            const rapidDuplicateWindow = 2000; // 2 seconds for identical calls
+            
+            if (lastExecution && (now - lastExecution) < rapidDuplicateWindow) {
+              console.warn(`🚫 BLOCKED: Identical ${action.toolName} call with same parameters within ${rapidDuplicateWindow/1000}s - likely duplicate`);
+              if (callId) executedToolCallIdsRef.current.add(callId);
+              continue;
+            }
+            
+            // Record this execution
+            recentExecutionsRef.current.set(semanticKey, now);
+            
+            // Clean up old entries (keep only last 10 seconds)
+            for (const [key, timestamp] of recentExecutionsRef.current.entries()) {
+              if (now - timestamp > 10000) {
+                recentExecutionsRef.current.delete(key);
+              }
+            }
+          }
           try {
             if (
               action.type === "executeUniverTool" &&
@@ -698,20 +726,65 @@ export function ChatSidebar({ onMobileClose }: { onMobileClose?: () => void }) {
               if (!univerAPI) throw new Error("Univer API not available");
 
               const cleanContext = await getCleanSheetContext(univerAPI);
-              const { columnName, formulaPattern, defaultValue } =
+              const { columnName, formulaPattern, defaultValue, insertBefore, insertAfter, between } =
                 action.params;
 
               // Find the best table to add column to
               const targetRegion = cleanContext.analysis.dataRegions[0];
               if (!targetRegion) throw new Error("No data regions found");
 
-              // Find next available column
-              const nextColumn =
-                cleanContext.analysis.emptyAreas.nextColumns[0];
-              if (!nextColumn) throw new Error("No space for new column");
+              // Smart column positioning logic
+              let targetColumnLetter: string;
+              
+              if (between && Array.isArray(between) && between.length === 2) {
+                // Insert between two columns (e.g., between D and E should insert at E)
+                const [leftCol, rightCol] = between;
+                // Convert column names to letters if needed
+                const leftLetter = typeof leftCol === 'string' && leftCol.length === 1 ? leftCol : 
+                  (targetRegion as any).headers?.find((h: any) => h.name === leftCol)?.letter || leftCol;
+                const rightLetter = typeof rightCol === 'string' && rightCol.length === 1 ? rightCol :
+                  (targetRegion as any).headers?.find((h: any) => h.name === rightCol)?.letter || rightCol;
+                
+                targetColumnLetter = rightLetter; // Insert at the position of the right column
+                console.log(`📍 Positioning: Between ${leftLetter} and ${rightLetter} → Insert at ${targetColumnLetter}`);
+              } else if (insertBefore) {
+                // Insert before a specific column
+                const beforeLetter = typeof insertBefore === 'string' && insertBefore.length === 1 ? insertBefore :
+                  (targetRegion as any).headers?.find((h: any) => h.name === insertBefore)?.letter || insertBefore;
+                targetColumnLetter = beforeLetter;
+                console.log(`📍 Positioning: Before ${beforeLetter} → Insert at ${targetColumnLetter}`);
+              } else if (insertAfter) {
+                // Insert after a specific column
+                const afterLetter = typeof insertAfter === 'string' && insertAfter.length === 1 ? insertAfter :
+                  (targetRegion as any).headers?.find((h: any) => h.name === insertAfter)?.letter || insertAfter;
+                const nextColIndex = afterLetter.charCodeAt(0) - 65 + 1;
+                targetColumnLetter = String.fromCharCode(65 + nextColIndex);
+                console.log(`📍 Positioning: After ${afterLetter} → Insert at ${targetColumnLetter}`);
+              } else {
+                // Default: use next available column
+                const nextColumn = cleanContext.analysis.emptyAreas.nextColumns[0];
+                if (!nextColumn) throw new Error("No space for new column");
+                targetColumnLetter = nextColumn;
+                console.log(`📍 Positioning: Default next available column → ${targetColumnLetter}`);
+              }
 
               const headerRow = parseInt(targetRegion.range.match(/\d+/)![0]);
               const worksheet = univerAPI.getActiveWorkbook().getActiveSheet();
+
+              // Insert column if position is specified (between, before, after)
+              if (between || insertBefore || insertAfter) {
+                const targetColIndex = targetColumnLetter.charCodeAt(0) - 65;
+                console.log(`📍 Inserting new column at index ${targetColIndex} (letter ${targetColumnLetter})`);
+                
+                // Use correct Univer.js API: insertColumns (plural) not insertColumn
+                if (typeof worksheet.insertColumns === 'function') {
+                  worksheet.insertColumns(targetColIndex, 1);
+                  console.log(`✅ Successfully inserted column using insertColumns API`);
+                } else {
+                  console.warn('⚠️ insertColumns method not available, column insertion skipped');
+                  // Fallback: proceed without actual insertion (data will be added to target position)
+                }
+              }
 
               // 🧠 SEMANTIC INTELLIGENCE: Auto-detect if this column needs a calculation
               let smartFormula = formulaPattern;
@@ -741,8 +814,8 @@ export function ChatSidebar({ onMobileClose }: { onMobileClose?: () => void }) {
                 }
               }
 
-              // Add header
-              const headerColIndex = nextColumn.charCodeAt(0) - 65;
+              // Add header  
+              const headerColIndex = targetColumnLetter.charCodeAt(0) - 65;
               const headerRowIndex = headerRow - 1;
               worksheet
                 .getRange(headerRowIndex, headerColIndex, 1, 1)
@@ -783,10 +856,10 @@ export function ChatSidebar({ onMobileClose }: { onMobileClose?: () => void }) {
 
               // Record a rich recent action so follow-ups like "format it" can target this column
               try {
-                const headerCell = `${nextColumn}${headerRow}`;
-                const dataRange = `${nextColumn}${
+                const headerCell = `${targetColumnLetter}${headerRow}`;
+                const dataRange = `${targetColumnLetter}${
                   headerRow + 1
-                }:${nextColumn}$${headerRow + targetRegion.rowCount}`.replace(
+                }:${targetColumnLetter}$${headerRow + targetRegion.rowCount}`.replace(
                   /\$+/g,
                   ""
                 );

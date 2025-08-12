@@ -21,7 +21,6 @@ export const metadata: Metadata = {
     shortcut: "/logo.png",
     apple: "/logo.png",
   },
-  manifest: "/manifest.json",
 };
 
 export default function RootLayout({

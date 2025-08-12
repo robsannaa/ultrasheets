@@ -40,12 +40,6 @@ export function initializeModernTools(): void {
     registerUniversalTool(tool);
   });
 
-  const totalTools =
-    MODERN_TOOLS.length + MIGRATED_TOOLS.length + ADDITIONAL_TOOLS.length;
-  console.log(
-    `🚀 Modern tools initialized: ${MODERN_TOOLS.length} core + ${MIGRATED_TOOLS.length} migrated + ${ADDITIONAL_TOOLS.length} additional = ${totalTools} total tools`
-  );
-
   // Debug info in development
   if (process.env.NODE_ENV === "development") {
     debugToolRegistry();
@@ -268,7 +262,4 @@ export function setupModernUniverBridge(): void {
     performance: PerformanceMonitor,
     migration: MigrationHelper,
   };
-
-  console.log("🔧 Modern Univer Bridge setup complete");
-  console.log("🐛 Debug utilities available at window.__modernContext");
 }

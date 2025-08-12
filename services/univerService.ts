@@ -686,13 +686,13 @@ export class UniverService {
       const worksheet = workbook.getActiveSheet();
 
       // WARNING: insertColumn may not be available in Univer Facade API
-      if (typeof worksheet.insertColumn !== "function") {
+      if (typeof worksheet.insertColumns !== "function") {
         throw new Error(
-          "insertColumn method not available in current Univer version"
+          "insertColumns method not available in current Univer version"
         );
       }
-      worksheet.insertColumn(colIndex);
-      return `Successfully inserted column at index ${colIndex}`;
+      worksheet.insertColumns(colIndex, 1);
+      return `Successfully inserted column at index ${colIndex} using insertColumns API`;
     } catch (error) {
       throw new Error(
         `Failed to insert column: ${

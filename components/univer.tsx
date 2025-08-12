@@ -8,6 +8,7 @@ import "@univerjs/preset-sheets-drawing/lib/index.css";
 import "@univerjs/preset-sheets-advanced/lib/index.css";
 import "@univerjs/preset-sheets-conditional-formatting/lib/index.css";
 import "@univerjs/preset-sheets-sort/lib/index.css";
+import "@univerjs/preset-sheets-table/lib/index.css";
 
 // Global tool execution handler
 declare global {
@@ -117,7 +118,6 @@ export function Univer() {
         );
         filterPreset = filterModule.UniverSheetsFilterPreset;
         filterLocales = filterLocaleModule.default;
-        console.log("✅ Filter preset loaded successfully");
       } catch (error) {
         console.warn(
           "⚠️ Filter preset not available, continuing without filters:",
@@ -135,7 +135,6 @@ export function Univer() {
         );
         sortPreset = sortModule.UniverSheetsSortPreset;
         sortLocales = sortLocaleModule.default;
-        console.log("✅ Sort preset loaded successfully");
       } catch (error) {
         console.warn(
           "⚠️ Sort preset not available, continuing without sorting:",
@@ -236,9 +235,6 @@ export function Univer() {
         const univerAPI = window.__ultraUniverAPI;
         (window as any).univerAPI = univerAPI;
 
-        console.log(
-          "🎯 Univer component: Reusing existing univerAPI (guarded re-init)"
-        );
         return;
       }
 
@@ -285,7 +281,6 @@ export function Univer() {
       (window as any).__attachUltraDispatcher = () => {
         try {
           setupModernUniverBridge();
-          console.log("🚀 Modern tool system initialized");
         } catch (modernError) {
           console.error(
             "❌ Failed to initialize modern tool system:",
@@ -302,8 +297,6 @@ export function Univer() {
         console.error("❌ Failed to attach modern tool dispatcher:", e);
         throw e;
       }
-
-      console.log("🎯 Univer component: Initialization complete");
     };
 
     initializeUniver().catch(console.error);

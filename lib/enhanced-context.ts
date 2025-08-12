@@ -547,121 +547,125 @@ export function extractEnhancedWorkbookData(): {
     const activeName = snap?.name || "Sheet";
 
     // Build a single-sheet context from active sheet snapshot only to avoid workbook.save() circular structures
-    const sheets: EnhancedSheetContext[] = [(() => {
-      const s = snap || ({} as any);
-      const name = s?.name || "Sheet";
-      // Ensure JSON-safe copy of cellData (strip functions/DI refs)
-      const rawCellData = s?.cellData || {};
-      const cellData: Record<string, any> = {};
-      for (const r of Object.keys(rawCellData)) {
-        const row = rawCellData[r] || {};
-        const safeRow: Record<string, any> = {};
-        for (const c of Object.keys(row)) {
-          const cell = row[c];
-          if (
-            cell &&
-            (typeof cell === "object" || typeof cell === "function")
-          ) {
-            // Keep only primitive fields used by detectors
-            const v = (cell as any).v;
-            const f = (cell as any).f;
-            safeRow[c] = { v, f };
-          } else {
-            safeRow[c] = cell;
+    const sheets: EnhancedSheetContext[] = [
+      (() => {
+        const s = snap || ({} as any);
+        const name = s?.name || "Sheet";
+        // Ensure JSON-safe copy of cellData (strip functions/DI refs)
+        const rawCellData = s?.cellData || {};
+        const cellData: Record<string, any> = {};
+        for (const r of Object.keys(rawCellData)) {
+          const row = rawCellData[r] || {};
+          const safeRow: Record<string, any> = {};
+          for (const c of Object.keys(row)) {
+            const cell = row[c];
+            if (
+              cell &&
+              (typeof cell === "object" || typeof cell === "function")
+            ) {
+              // Keep only primitive fields used by detectors
+              const v = (cell as any).v;
+              const f = (cell as any).f;
+              safeRow[c] = { v, f };
+            } else {
+              safeRow[c] = cell;
+            }
+          }
+          cellData[r] = safeRow;
+        }
+        const isActive = true;
+
+        // Enhanced table detection
+        const tables = detectTablesWithSpatialContext(cellData);
+
+        // Selection analysis (only for active sheet)
+        let selection: SelectionContext;
+        let liveSelection: LiveSelectionData | undefined = undefined;
+
+        if (isActive) {
+          selection = analyzeSelectionIntent(univerAPI, tables);
+
+          // Get live selection data if there's an active selection
+          if (selection.hasSelection) {
+            try {
+              const activeSheet = univerAPI
+                .getActiveWorkbook()
+                .getActiveSheet();
+              const activeRange = activeSheet.getSelection()?.getActiveRange();
+              liveSelection = analyzeLiveSelectionData(univerAPI, activeRange);
+            } catch (error) {
+              console.error("Error getting live selection data:", error);
+            }
+          }
+        } else {
+          selection = {
+            hasSelection: false,
+            activeRange: null,
+            selectedTable: null,
+            selectionIntent: "unknown" as const,
+            currentCell: null,
+          };
+        }
+
+        // Calculate spatial map
+        let maxRowUsed = -1;
+        let maxColUsed = -1;
+
+        for (const r in cellData) {
+          for (const c in cellData[r]) {
+            const cell = cellData[r][c];
+            if (
+              cell &&
+              cell.v !== undefined &&
+              cell.v !== null &&
+              cell.v !== ""
+            ) {
+              const ri = parseInt(r, 10);
+              const ci = parseInt(c, 10);
+              if (ri > maxRowUsed) maxRowUsed = ri;
+              if (ci > maxColUsed) maxColUsed = ci;
+            }
           }
         }
-        cellData[r] = safeRow;
-      }
-      const isActive = true;
 
-      // Enhanced table detection
-      const tables = detectTablesWithSpatialContext(cellData);
+        const usedRange =
+          maxRowUsed >= 0 && maxColUsed >= 0
+            ? `A1:${String.fromCharCode(65 + maxColUsed)}${maxRowUsed + 1}`
+            : "A1:A1";
 
-      // Selection analysis (only for active sheet)
-      let selection: SelectionContext;
-      let liveSelection: LiveSelectionData | undefined = undefined;
-
-      if (isActive) {
-        selection = analyzeSelectionIntent(univerAPI, tables);
-
-        // Get live selection data if there's an active selection
-        if (selection.hasSelection) {
-          try {
-            const activeSheet = univerAPI.getActiveWorkbook().getActiveSheet();
-            const activeRange = activeSheet.getSelection()?.getActiveRange();
-            liveSelection = analyzeLiveSelectionData(univerAPI, activeRange);
-          } catch (error) {
-            console.error("Error getting live selection data:", error);
-          }
+        // Find globally safe positions
+        const freeColumns: string[] = [];
+        for (let c = maxColUsed + 1; c <= Math.min(maxColUsed + 10, 25); c++) {
+          freeColumns.push(String.fromCharCode(65 + c));
         }
-      } else {
-        selection = {
-          hasSelection: false,
-          activeRange: null,
-          selectedTable: null,
-          selectionIntent: "unknown" as const,
-          currentCell: null,
+
+        const nextSafeColumn = freeColumns[0] || "Z";
+        const nextSafeRow = maxRowUsed + 2;
+
+        // Generate intelligent suggestions
+        const intelligentSuggestions = generateIntelligentSuggestions(
+          tables,
+          selection,
+          liveSelection
+        );
+
+        return {
+          name,
+          isActive,
+          tables,
+          selection,
+          liveSelection,
+          spatialMap: {
+            usedRange,
+            freeColumns,
+            freeRows: [], // Can be calculated if needed
+            nextSafeColumn,
+            nextSafeRow,
+          },
+          intelligentSuggestions,
         };
-      }
-
-      // Calculate spatial map
-      let maxRowUsed = -1;
-      let maxColUsed = -1;
-
-      for (const r in cellData) {
-        for (const c in cellData[r]) {
-          const cell = cellData[r][c];
-          if (
-            cell &&
-            cell.v !== undefined &&
-            cell.v !== null &&
-            cell.v !== ""
-          ) {
-            const ri = parseInt(r, 10);
-            const ci = parseInt(c, 10);
-            if (ri > maxRowUsed) maxRowUsed = ri;
-            if (ci > maxColUsed) maxColUsed = ci;
-          }
-        }
-      }
-
-      const usedRange =
-        maxRowUsed >= 0 && maxColUsed >= 0
-          ? `A1:${String.fromCharCode(65 + maxColUsed)}${maxRowUsed + 1}`
-          : "A1:A1";
-
-      // Find globally safe positions
-      const freeColumns: string[] = [];
-      for (let c = maxColUsed + 1; c <= Math.min(maxColUsed + 10, 25); c++) {
-        freeColumns.push(String.fromCharCode(65 + c));
-      }
-
-      const nextSafeColumn = freeColumns[0] || "Z";
-      const nextSafeRow = maxRowUsed + 2;
-
-      // Generate intelligent suggestions
-      const intelligentSuggestions = generateIntelligentSuggestions(
-        tables,
-        selection,
-        liveSelection
-      );
-
-      return {
-        name,
-        isActive,
-        tables,
-        selection,
-        liveSelection,
-        spatialMap: {
-          usedRange,
-          freeColumns,
-          freeRows: [], // Can be calculated if needed
-          nextSafeColumn,
-          nextSafeRow,
-        },
-        intelligentSuggestions,
-      };
-    })()];
+      })(),
+    ];
 
     // Get recent actions
     const recentActions = (window as any).ultraActionLog || [];

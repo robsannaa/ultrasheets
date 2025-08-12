@@ -210,18 +210,38 @@ SMART GUIDANCE:
       model: openai("gpt-4o-mini"),
       system: `You are a professional spreadsheet analysis assistant with access to powerful tools for data manipulation and visualization.
 
-🔄 REAL-TIME CONTEXT STRATEGY:
-You do NOT have static spreadsheet data. Instead, you have tools to query the current state:
-- MANDATORY: Call 'get_workbook_snapshot' FIRST to see complete sheet contents and structure
-- Use 'get_active_sheet_context' for detailed analysis of the current sheet  
-- Use 'get_selection_context' to understand what the user has selected and their likely intent
-- NEVER assume column names or ranges - ALWAYS get the snapshot first to see actual data
-- This ensures you have fresh, accurate data about the current state
+🚨 CRITICAL TOOL EXECUTION RULES:
+- NEVER call the same tool with identical parameters multiple times in a single response
+- When adding ONE column, call smart_add_column EXACTLY ONCE
+- When user says "add a column", that means ONE column, not multiple identical insertions
+- Distinguish between legitimate multiple calls (different params) vs accidental duplicates (same params)
+- Multiple different operations are OK: "Add Total column AND Percentage column" = two different smart_add_column calls
+- Identical operations are NOT OK: One user request should not result in multiple identical tool executions
 
-CRITICAL: Before ANY operation (totals, formatting, charts, etc.), call get_workbook_snapshot to see:
-- Exact column headers and their positions
-- Data locations and ranges
-- Sheet structure and content
+🔄 INTELLIGENT CONTEXT STRATEGY:
+You do NOT have static spreadsheet data. Instead, you have tools to query the current state WHEN NEEDED:
+
+SMART CONTEXT GATHERING - Call context tools strategically:
+
+ALWAYS need context (call get_workbook_snapshot first):
+- Creating charts, pivot tables, or complex visualizations
+- Adding columns to tables (need table structure and available space)
+- Operations involving data discovery ("analyze this data", "what columns do I have")
+- Multi-table operations or cross-sheet analysis
+- When user asks vague questions without specifying ranges
+
+SOMETIMES need context (use judgment based on recent actions):
+- Formatting operations when ranges are not specified
+- Totals/calculations when column names are ambiguous
+- Operations that depend on table boundaries or data structure
+
+RARELY need context (can execute directly):
+- Setting specific cell values with explicit cell references (A1, B5, etc.)
+- Formatting with explicit ranges provided by user
+- Simple operations on recently created/modified data where structure is known
+- Follow-up operations where context was just gathered in previous steps
+
+LEVERAGE RECENT CONTEXT: If workbook context was provided in the conversation or recent actions show the data structure, USE THAT INFORMATION instead of re-querying.
 
 
 🧠 INTELLIGENT ANALYSIS LEVERAGE:
@@ -298,17 +318,27 @@ TOOL SELECTION GUIDE:
 - 🔄 ALWAYS START: Use get_workbook_snapshot to see complete sheet data and structure first
 
 COLUMN OPERATIONS:
-- "add column", "add new column", "create column" → Use smart_add_column tool (automatically finds correct table and position)
+- "add column", "add new column", "create column" → Use smart_add_column tool
+- "add column between X and Y", "insert column between D and E" → Use smart_add_column with between: ["D", "E"]
+- "add column before X", "insert column before Amount" → Use smart_add_column with insertBefore: "X"
+- "add column after Y", "insert column after Date" → Use smart_add_column with insertAfter: "Y"
 - "calculate X per Y", "price per kg", "cost per unit", "X divided by Y" → Use smart_add_column tool with formula pattern (e.g., formulaPattern: "=E{row}/D{row}")
 - "add calculated column", "create formula column", "compute X from Y and Z" → Use smart_add_column tool
-- "vlookup", "lookup", "find value" → Use intelligent_vlookup tool (context-aware table and column detection)
+
+CRITICAL: When user specifies column position ("between D and E", "before Amount", "after Date"), you MUST use the positioning parameters:
+- between: ["D", "E"] for "between D and E"
+- insertBefore: "Amount" for "before Amount" 
+- insertAfter: "Date" for "after Date"
+
+- "vlookup", "lookup", "find value" → Use vlookup tool with standard Excel syntax: VLOOKUP(lookup_value, table_array, col_index_num, FALSE)
 - "list columns" or "show columns" → Use get_active_sheet_context for full table structure (avoid the legacy list_columns tool)
 - When there may be multiple tables, use list_tables first, then pass tableId or data_range to downstream tools
 
 INTELLIGENT FILTERING:
+- "show only X", "show deposits only", "filter for X", "hide Y rows" → Use filter_data tool (applies filter criteria automatically)  
 - "add filter", "add filters", "enable filtering", "create filter" → Use add_filter tool (creates Excel-like filter dropdowns in headers)
-- The add_filter tool automatically detects table range and applies filters to all columns
-- After adding filters, users can interact with the dropdown arrows in headers to filter data
+- The filter_data tool detects the appropriate column and applies specific criteria to show/hide rows
+- The add_filter tool creates interactive dropdowns but doesn't apply criteria automatically
 
 INTELLIGENT TOTALS SELECTION (for bottom-of-table summaries only):
 - "add totals", "calculate totals", "sum all", "total everything" → Use add_smart_totals tool (automatically detects and totals ALL calculable columns)
@@ -405,7 +435,7 @@ Be professional, execute requests immediately, and provide specific insights bas
 
         smart_add_column: tool({
           description:
-            "Add calculated column to table - intelligently detects table structure and creates per-row formulas. Use for 'calculate X per Y', 'price per kg', ratio calculations, etc.",
+            "Add a column with optional per-row formula. Prefer specifying position explicitly: insertBefore, insertAfter, or between (e.g., 'between A and B' or 'before B').",
           parameters: z.object({
             columnName: z
               .string()
@@ -422,14 +452,34 @@ Be professional, execute requests immediately, and provide specific insights bas
               .union([z.string(), z.number()])
               .optional()
               .describe("Default value if no formula"),
+            // Position hints. The LLM should fill exactly one of these when the user asks for placement like 'between A and B' or 'before B'.
+            insertBefore: z
+              .union([z.string(), z.number()])
+              .optional()
+              .describe(
+                "Column letter, header text, or 1-based index to insert before"
+              ),
+            insertAfter: z
+              .union([z.string(), z.number()])
+              .optional()
+              .describe(
+                "Column letter, header text, or 1-based index to insert after"
+              ),
+            between: z
+              .array(z.union([z.string(), z.number()]))
+              .length(2)
+              .optional()
+              .describe(
+                "Two anchors (letters or headers) indicating insertion between them"
+              ),
           }),
-          execute: async ({ columnName, formulaPattern, defaultValue }) => {
+          execute: async (params) => {
             return {
               message:
                 "🧠 Getting REAL sheet context to find the perfect column location...",
               clientSideAction: {
                 type: "smartAddColumnWithContext",
-                params: { columnName, formulaPattern, defaultValue },
+                params,
               },
             };
           },
@@ -537,39 +587,44 @@ Be professional, execute requests immediately, and provide specific insights bas
           },
         }),
 
-        intelligent_vlookup: tool({
+        vlookup: tool({
           description:
-            "VLOOKUP with ZERO hardcoding - analyzes real tables, finds actual columns, creates precise formulas",
+            "Create VLOOKUP formula exactly like Excel. VLOOKUP(lookup_value, table_array, col_index_num, [range_lookup])",
           parameters: z.object({
+            targetCell: z
+              .string()
+              .describe("Cell where to write the VLOOKUP formula (e.g., 'F2')"),
             lookupValue: z
               .string()
-              .describe("Value to lookup (cell reference or literal)"),
-            lookupColumn: z
+              .describe("Value to lookup - can be cell reference (e.g., 'A2') or literal value (e.g., 'Product1')"),
+            tableArray: z
               .string()
-              .optional()
-              .describe("Column to search in (will auto-detect best option)"),
-            returnColumn: z
-              .string()
-              .optional()
-              .describe("Column to return (will suggest based on data types)"),
-            exactMatch: z
+              .describe("Table range for lookup (e.g., 'Sheet1!A:D' or 'A1:D10')"),
+            colIndexNum: z
+              .number()
+              .describe("Column number in table_array to return (1 = first column, 2 = second, etc.)"),
+            rangeLookup: z
               .boolean()
               .optional()
-              .default(true)
-              .describe("Exact match (TRUE) or approximate (FALSE)"),
+              .default(false)
+              .describe("FALSE for exact match (default), TRUE for approximate match"),
           }),
           execute: async ({
+            targetCell,
             lookupValue,
-            lookupColumn,
-            returnColumn,
-            exactMatch = true,
+            tableArray,
+            colIndexNum,
+            rangeLookup = false,
           }) => {
+            const formula = `=VLOOKUP(${lookupValue},${tableArray},${colIndexNum},${rangeLookup ? "TRUE" : "FALSE"})`;
+            
             return {
-              message:
-                "🔍 Analyzing REAL table structures for perfect VLOOKUP setup...",
+              message: `Creating VLOOKUP formula in ${targetCell}: ${formula}`,
               clientSideAction: {
-                type: "intelligentVlookupWithContext",
-                params: { lookupValue, lookupColumn, returnColumn, exactMatch },
+                type: "setCellValue",
+                cell: targetCell,
+                value: formula,
+                formula: true,
               },
             };
           },
@@ -1169,6 +1224,68 @@ The tool intelligently finds the table and applies filters to the entire table r
           },
         }),
 
+        filter_data: tool({
+          description: `Filter data to show only specific values. This adds filters AND applies criteria automatically.
+
+- Creates filter dropdowns if they don't exist
+- Applies specific filter criteria to show only matching rows
+- Perfect for "show only X", "hide Y", "filter for Z" requests
+- Handles text contains, exact matches, and multiple values
+
+When to use:
+- User asks "show only deposits", "show deposits only", "filter for positive values"
+- User wants to see specific subset of data
+- User asks to hide/show certain rows based on criteria
+
+The tool intelligently detects the appropriate column and applies the filter criteria.`,
+          parameters: z.object({
+            column: z
+              .string()
+              .optional()
+              .describe(
+                "Column name or letter to filter on. If not specified, will try to detect from context/values."
+              ),
+            values: z
+              .array(z.string())
+              .optional()
+              .describe(
+                "Specific values to show (exact matches). Use for 'show only Deposit' type requests."
+              ),
+            contains: z
+              .string()
+              .optional()
+              .describe(
+                "Text that values should contain. Use for partial matching."
+              ),
+            condition: z
+              .enum(["greater_than", "less_than", "equals", "not_equals", "contains", "not_contains"])
+              .optional()
+              .describe("Condition type for filtering."),
+            conditionValue: z
+              .union([z.string(), z.number()])
+              .optional()
+              .describe("Value to compare against for conditions."),
+            tableId: z
+              .string()
+              .optional()
+              .describe(
+                "Optional table ID to target. If not specified, applies to the primary table."
+              ),
+          }),
+          execute: async ({ column, values, contains, condition, conditionValue, tableId }) => {
+            return {
+              message: `Filtering data${column ? ` in column ${column}` : ""}${
+                values ? ` to show: ${values.join(", ")}` : ""
+              }${contains ? ` containing: ${contains}` : ""}...`,
+              clientSideAction: {
+                type: "executeUniverTool",
+                toolName: "filter_data",
+                params: { column, values, contains, condition, conditionValue, tableId },
+              },
+            };
+          },
+        }),
+
         sort_table: tool({
           description:
             "Sort table data by specified column in ascending or descending order. Works with both column names and column letters.",
@@ -1345,7 +1462,7 @@ The tool intelligently finds the table and applies filters to the entire table r
 
         conditional_formatting: tool({
           description:
-            "Add conditional formatting rules (e.g., negatives red, values between X and Y, text contains)",
+            "Add conditional formatting rules. You MUST provide explicit visual styles when you want colors. Do not assume defaults.",
           parameters: z.object({
             range: z
               .string()
@@ -1382,16 +1499,15 @@ The tool intelligently finds the table and applies filters to the entire table r
             startsWith: z.string().optional(),
             endsWith: z.string().optional(),
             formula: z.string().optional(),
-            background: z
-              .string()
-              .optional()
-              .describe("Background color (e.g., '#FF0000')"),
-            fontColor: z
-              .string()
-              .optional()
-              .describe("Font color (e.g., '#00FF00')"),
-            bold: z.boolean().optional(),
-            italic: z.boolean().optional(),
+            // The format object is passed through to the client tool. When specifying visual intent, set either backgroundColor or fontColor.
+            format: z
+              .object({
+                backgroundColor: z.string().optional(),
+                fontColor: z.string().optional(),
+                bold: z.boolean().optional(),
+                italic: z.boolean().optional(),
+              })
+              .optional(),
           }),
           execute: async (params) => {
             return {

@@ -70,3 +70,4 @@ Additional IMPORTANT rules:
 - You always double check the docs of libraries we are using to avoid manually implementing stuff when there are out-of-the-box solutions available.
 - You think as an OpenAI frontend engineer when creating or modifying UI elements.
   You ALWAYS implement a solution reccomended in the Univer docs when interacting with the Sheet. You never build manual solutions or use other methodologies. The docs are your unique source of knowledge.
+- Never push to github

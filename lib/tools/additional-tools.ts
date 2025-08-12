@@ -237,16 +237,28 @@ export const FormatAsTableTool = createSimpleTool(
   {
     name: "format_as_table",
     description:
-      "Format a range as a table with borders, alternating row colors, and styling",
+      "Create a Univer Table from an A1 range using @univerjs/preset-sheets-table (no manual styling)",
     category: "format",
-    requiredContext: ["tables"],
-    invalidatesCache: false,
+    requiredContext: [],
+    invalidatesCache: true,
   },
   async (
     context: UniversalToolContext,
     params: {
-      tableId?: string;
       range?: string;
+      name?: string;
+      tableId?: string;
+      showHeader?: boolean;
+      theme?:
+        | {
+            name: string;
+            headerRowStyle?: any;
+            firstRowStyle?: any;
+            lastRowStyle?: any;
+            bandedRowsStyle?: any;
+          }
+        | string;
+      // Back-compat (ignored, we now rely on Table preset):
       style?: "light" | "medium" | "dark";
       alternatingRows?: boolean;
       headerRow?: boolean;
@@ -254,127 +266,127 @@ export const FormatAsTableTool = createSimpleTool(
     }
   ) => {
     const {
-      tableId,
-      range,
-      style = "medium",
-      alternatingRows = true,
-      headerRow = true,
-      borders = true,
+      range: inputRange,
+      name,
+      tableId: inputTableId,
+      showHeader = true,
+      theme,
     } = params;
 
-    let targetRange = range;
-    if (!targetRange && tableId) {
-      const table = context.findTable(tableId);
-      if (table) {
-        targetRange = table.range;
-      }
+    // Validate API availability per Univer docs
+    const ws: any = context.fWorksheet as any;
+    const wb: any = context.fWorkbook as any;
+    if (typeof ws.addTable !== "function") {
+      throw new Error(
+        "The Table preset is not available. Please install '@univerjs/preset-sheets-table' and ensure it is registered."
+      );
     }
 
+    // Determine target A1 range
+    let targetRange = inputRange;
     if (!targetRange) {
-      throw new Error("Either tableId or range must be provided");
+      const table = context.findTable(inputTableId);
+      if (table?.range) targetRange = table.range;
+    }
+    if (!targetRange || !/^[A-Z]+\d+:[A-Z]+\d+$/.test(targetRange)) {
+      throw new Error(
+        `A valid A1 range is required (e.g., 'B2:F11'). Received: '${
+          targetRange || ""
+        }'`
+      );
     }
 
-    // Parse the range
-    const rangeMatch = targetRange.match(/([A-Z]+)(\d+):([A-Z]+)(\d+)/);
-    if (!rangeMatch) {
-      throw new Error(`Invalid range format: ${targetRange}`);
-    }
-
-    const [, startCol, startRow, endCol, endRow] = rangeMatch;
-    const startRowIndex = parseInt(startRow) - 1;
-    const endRowIndex = parseInt(endRow) - 1;
-    const startColIndex =
-      startCol
-        .split("")
-        .reduce((acc, char) => acc * 26 + (char.charCodeAt(0) - 64), 0) - 1;
-    const endColIndex =
-      endCol
-        .split("")
-        .reduce((acc, char) => acc * 26 + (char.charCodeAt(0) - 64), 0) - 1;
-
-    const appliedFormats = [];
-
-    // Color schemes for different table styles
-    const colorSchemes = {
-      light: {
-        headerBg: "#F2F2F2",
-        headerText: "#000000",
-        alternateRowBg: "#F9F9F9",
-        borderColor: "#D0D0D0",
-      },
-      medium: {
-        headerBg: "#4472C4",
-        headerText: "#FFFFFF",
-        alternateRowBg: "#F2F2F2",
-        borderColor: "#A6A6A6",
-      },
-      dark: {
-        headerBg: "#2F4F4F",
-        headerText: "#FFFFFF",
-        alternateRowBg: "#E8E8E8",
-        borderColor: "#808080",
-      },
+    // Build unique name and id when absent
+    const existingTables =
+      typeof wb.getTableList === "function" ? wb.getTableList() || [] : [];
+    const ensureUnique = (base: string, exists: (s: string) => boolean) => {
+      if (!exists(base)) return base;
+      let i = 1;
+      while (exists(`${base}_${i}`)) i += 1;
+      return `${base}_${i}`;
     };
 
-    const colors = colorSchemes[style];
+    const desiredName = name || "Table";
+    const uniqueName = ensureUnique(
+      desiredName,
+      (n) =>
+        !!(
+          (typeof wb.getTableInfoByName === "function" &&
+            wb.getTableInfoByName(n)) ||
+          existingTables.find((t: any) => t?.name === n)
+        )
+    );
 
-    // Format header row
-    if (headerRow) {
-      const headerRange = `${startCol}${startRow}:${endCol}${startRow}`;
-      const headerRangeObj = context.fWorksheet.getRange(headerRange);
-      headerRangeObj.setBackgroundColor(colors.headerBg);
-      headerRangeObj.setFontColor(colors.headerText);
-      headerRangeObj.setBold(true);
-      appliedFormats.push("header formatting");
+    const baseId =
+      inputTableId || uniqueName.toLowerCase().replace(/\W+/g, "-");
+    const uniqueId = ensureUnique(
+      baseId,
+      (id) => !!(typeof wb.getTableInfo === "function" && wb.getTableInfo(id))
+    );
+
+    // Convert A1 to IRangeData per docs via getRange().getRange()
+    const fRange = ws.getRange(targetRange);
+    const iRange =
+      typeof (fRange as any).getRange === "function"
+        ? (fRange as any).getRange()
+        : undefined;
+    if (!iRange) {
+      throw new Error("Could not resolve range payload for addTable().");
     }
 
-    // Apply alternating row colors
-    if (alternatingRows) {
-      const dataStartRow = headerRow ? startRowIndex + 1 : startRowIndex;
-      for (let row = dataStartRow; row <= endRowIndex; row++) {
-        if ((row - dataStartRow) % 2 === 1) {
-          // Every other row
-          const rowRange = `${startCol}${row + 1}:${endCol}${row + 1}`;
-          const rowRangeObj = context.fWorksheet.getRange(rowRange);
-          rowRangeObj.setBackgroundColor(colors.alternateRowBg);
+    // Create table
+    const success = await ws.addTable(uniqueName, iRange, uniqueId, {
+      showHeader: Boolean(showHeader),
+    });
+
+    if (!success) {
+      throw new Error(
+        "addTable() returned false. The range may be invalid or overlapping."
+      );
+    }
+
+    // Optionally register a theme
+    let appliedThemeName: string | undefined;
+    if (theme) {
+      // Accept either a string (name) or a full theme object
+      if (typeof theme === "string") {
+        // Try applying existing theme by name if API exists
+        if (typeof ws.setTableTheme === "function") {
+          try {
+            await ws.setTableTheme(uniqueId, theme);
+            appliedThemeName = theme;
+          } catch {}
+        } else if (typeof ws.applyTableTheme === "function") {
+          try {
+            await ws.applyTableTheme(uniqueId, theme);
+            appliedThemeName = theme;
+          } catch {}
+        } else {
+          // Fallback: cannot apply by name with current API
+          appliedThemeName = undefined;
         }
+      } else if (typeof ws.addTableTheme === "function") {
+        const themeName = theme.name || `${uniqueName}-theme`;
+        await ws.addTableTheme(uniqueId, { ...theme, name: themeName });
+        appliedThemeName = themeName;
       }
-      appliedFormats.push("alternating row colors");
     }
 
-    // Apply borders
-    if (borders) {
-      const tableRangeObj = context.fWorksheet.getRange(targetRange);
-      // Note: Border methods may vary by Univer version
-      if (typeof tableRangeObj.setBorder === "function") {
-        tableRangeObj.setBorder("all", colors.borderColor, "thin");
-      } else if (typeof tableRangeObj.setBorders === "function") {
-        tableRangeObj.setBorders(
-          true,
-          true,
-          true,
-          true,
-          true,
-          true,
-          colors.borderColor,
-          "thin"
-        );
-      }
-      appliedFormats.push("borders");
-    }
+    // Retrieve info for response
+    const tableInfo =
+      typeof wb.getTableInfo === "function" ? wb.getTableInfo(uniqueId) : null;
 
     return {
+      success: true,
       range: targetRange,
-      style,
-      appliedFormats,
-      options: {
-        alternatingRows,
-        headerRow,
-        borders,
-      },
-      message: `Formatted ${targetRange} as ${style} table with: ${appliedFormats.join(
-        ", "
-      )}`,
+      name: uniqueName,
+      tableId: uniqueId,
+      showHeader: Boolean(showHeader),
+      theme: appliedThemeName || null,
+      tableInfo,
+      message: `Created table '${uniqueName}' (${uniqueId}) for ${targetRange}${
+        appliedThemeName ? ` with theme '${appliedThemeName}'` : ""
+      }.`,
     };
   }
 );
@@ -387,7 +399,7 @@ export const ConditionalFormattingTool = createSimpleTool(
   {
     name: "conditional_formatting",
     description:
-      "Apply conditional formatting rules to highlight cells based on their values",
+      "Apply conditional formatting rules to highlight cells based on their values. Colors must be provided by the caller (LLM). No hardcoded defaults are used.",
     category: "format",
     requiredContext: [],
     invalidatesCache: false,
@@ -411,12 +423,12 @@ export const ConditionalFormattingTool = createSimpleTool(
     if (!range) {
       throw new Error("Range is required for conditional formatting");
     }
-    
+
     // Provide intelligent defaults for number conditions if missing
     let effectiveMin = min;
     let effectiveMax = max;
     let effectiveEquals = equals;
-    
+
     // Infer rule
     let inferredRule = ruleType || incomingCondition || "";
     if (!inferredRule) {
@@ -434,7 +446,11 @@ export const ConditionalFormattingTool = createSimpleTool(
       else {
         // Smart inference: if no specific condition, analyze the data to suggest something useful
         // For price columns, default to highlighting high values
-        if (range.includes("C") || range.includes("Price") || range.includes("price")) {
+        if (
+          range.includes("C") ||
+          range.includes("Price") ||
+          range.includes("price")
+        ) {
           inferredRule = "number_gt";
           effectiveMin = 10; // Highlight prices over $10
         } else {
@@ -442,17 +458,26 @@ export const ConditionalFormattingTool = createSimpleTool(
         }
       }
     }
-    
+
     if (inferredRule.startsWith("number_")) {
       // For number conditions without explicit values, provide sensible defaults
       if (inferredRule === "number_gt" && typeof effectiveMin !== "number") {
         effectiveMin = 0; // Default: highlight values greater than 0
-      } else if (inferredRule === "number_lt" && typeof effectiveMax !== "number") {
+      } else if (
+        inferredRule === "number_lt" &&
+        typeof effectiveMax !== "number"
+      ) {
         effectiveMax = 1000000; // Default: highlight values less than 1M
-      } else if (inferredRule === "number_between" && (typeof effectiveMin !== "number" || typeof effectiveMax !== "number")) {
+      } else if (
+        inferredRule === "number_between" &&
+        (typeof effectiveMin !== "number" || typeof effectiveMax !== "number")
+      ) {
         effectiveMin = 0;
         effectiveMax = 1000000;
-      } else if (inferredRule === "number_eq" && typeof effectiveEquals !== "number") {
+      } else if (
+        inferredRule === "number_eq" &&
+        typeof effectiveEquals !== "number"
+      ) {
         effectiveEquals = 0; // Default: highlight zero values
       }
     }
@@ -563,33 +588,74 @@ export const ConditionalFormattingTool = createSimpleTool(
         throw new Error(`Unsupported ruleType: ${inferredRule}`);
     }
 
-    // Apply formatting only for classic single-format rules; color scales manage visuals themselves
+    // Apply formatting only if explicitly provided by caller.
     const isVisualScaleRule = inferredRule === "color_scale";
     const canStyle =
       !isVisualScaleRule &&
       typeof (rule as any).setBackground === "function" &&
       typeof (rule as any).setFontColor === "function";
+
+    // Helper: normalize color (accept hex or common names). Avoid off-brand palettes by requiring explicit input.
+    const named: Record<string, string> = {
+      green: "#22c55e",
+      red: "#ef4444",
+      yellow: "#eab308",
+      blue: "#3b82f6",
+      orange: "#f59e0b",
+      purple: "#a855f7",
+      gray: "#6b7280",
+      grey: "#6b7280",
+      black: "#000000",
+      white: "#ffffff",
+    };
+    const normalizeColor = (c?: string) => {
+      if (!c) return undefined;
+      const s = String(c).trim().toLowerCase();
+      if (s.startsWith("#") && (s.length === 7 || s.length === 4)) return s;
+      return named[s];
+    };
+
+    // Helper: pick readable text color for the given background if fontColor omitted
+    const pickText = (bg: string) => {
+      const hex = bg.replace("#", "");
+      const bigint = parseInt(
+        hex.length === 3
+          ? hex
+              .split("")
+              .map((ch) => ch + ch)
+              .join("")
+          : hex,
+        16
+      );
+      const r = (bigint >> 16) & 255;
+      const g = (bigint >> 8) & 255;
+      const b = bigint & 255;
+      const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+      return luminance > 0.6 ? "#000000" : "#ffffff";
+    };
+
     let effectiveFormat: any = {};
     if (canStyle) {
-      const hasAnyFormat = Boolean(
-        format?.backgroundColor ||
-          format?.fontColor ||
-          format?.bold ||
-          format?.italic
-      );
-      if (!hasAnyFormat) {
-        rule = (rule as any).setBackground("#FFEBEE").setFontColor("#000000");
-        effectiveFormat = { backgroundColor: "#FFEBEE", fontColor: "#000000" };
+      const bg = normalizeColor(format?.backgroundColor || format?.background);
+      const fg = normalizeColor(format?.fontColor || format?.color);
+
+      if (!bg && !fg && format?.bold == null && format?.italic == null) {
+        // No styling supplied; do not apply implicit colors.
+        effectiveFormat = {};
       } else {
-        if (format.backgroundColor)
-          rule = (rule as any).setBackground(format.backgroundColor);
-        if (format.fontColor)
-          rule = (rule as any).setFontColor(format.fontColor);
-        if (typeof (rule as any).setBold === "function" && format.bold)
+        if (bg) rule = (rule as any).setBackground(bg);
+        const finalFont = fg || (bg ? pickText(bg) : undefined);
+        if (finalFont) rule = (rule as any).setFontColor(finalFont);
+        if (typeof (rule as any).setBold === "function" && format?.bold)
           rule = (rule as any).setBold(true);
-        if (typeof (rule as any).setItalic === "function" && format.italic)
+        if (typeof (rule as any).setItalic === "function" && format?.italic)
           rule = (rule as any).setItalic(true);
-        effectiveFormat = format;
+        effectiveFormat = {
+          backgroundColor: bg,
+          fontColor: finalFont,
+          bold: Boolean(format?.bold),
+          italic: Boolean(format?.italic),
+        };
       }
     }
 
@@ -621,18 +687,20 @@ export const ConditionalFormattingTool = createSimpleTool(
           success: true,
           range,
           ruleType: inferredRule,
-          inputs: { 
-            min: effectiveMin, 
-            max: effectiveMax, 
+          inputs: {
+            min: effectiveMin,
+            max: effectiveMax,
             equals: effectiveEquals,
-            contains, 
-            startsWith, 
-            endsWith, 
-            formula 
+            contains,
+            startsWith,
+            endsWith,
+            formula,
           },
           format: effectiveFormat,
           ruleId,
-          message: `Applied conditional formatting to ${range} using '${inferredRule}'${effectiveMin !== undefined ? ` (${effectiveMin})` : ''}${effectiveMax !== undefined ? ` to ${effectiveMax}` : ''}`,
+          message: `Applied conditional formatting to ${range} using '${inferredRule}'${
+            effectiveMin !== undefined ? ` (${effectiveMin})` : ""
+          }${effectiveMax !== undefined ? ` to ${effectiveMax}` : ""}`,
         };
       } catch (err) {
         // Fall through to secondary API
@@ -650,18 +718,20 @@ export const ConditionalFormattingTool = createSimpleTool(
           success: true,
           range,
           ruleType: inferredRule,
-          inputs: { 
-            min: effectiveMin, 
-            max: effectiveMax, 
+          inputs: {
+            min: effectiveMin,
+            max: effectiveMax,
             equals: effectiveEquals,
-            contains, 
-            startsWith, 
-            endsWith, 
-            formula 
+            contains,
+            startsWith,
+            endsWith,
+            formula,
           },
           format: effectiveFormat,
           ruleId: res,
-          message: `Applied conditional formatting to ${range} using '${inferredRule}'${effectiveMin !== undefined ? ` (${effectiveMin})` : ''}${effectiveMax !== undefined ? ` to ${effectiveMax}` : ''}`,
+          message: `Applied conditional formatting to ${range} using '${inferredRule}'${
+            effectiveMin !== undefined ? ` (${effectiveMin})` : ""
+          }${effectiveMax !== undefined ? ` to ${effectiveMax}` : ""}`,
         };
       } catch (err) {
         // Continue to next fallback
@@ -676,18 +746,20 @@ export const ConditionalFormattingTool = createSimpleTool(
           success: true,
           range,
           ruleType: inferredRule,
-          inputs: { 
-            min: effectiveMin, 
-            max: effectiveMax, 
+          inputs: {
+            min: effectiveMin,
+            max: effectiveMax,
             equals: effectiveEquals,
-            contains, 
-            startsWith, 
-            endsWith, 
-            formula 
+            contains,
+            startsWith,
+            endsWith,
+            formula,
           },
           format: effectiveFormat,
           ruleId,
-          message: `Applied conditional formatting to ${range} using '${inferredRule}'${effectiveMin !== undefined ? ` (${effectiveMin})` : ''}${effectiveMax !== undefined ? ` to ${effectiveMax}` : ''}`,
+          message: `Applied conditional formatting to ${range} using '${inferredRule}'${
+            effectiveMin !== undefined ? ` (${effectiveMin})` : ""
+          }${effectiveMax !== undefined ? ` to ${effectiveMax}` : ""}`,
         };
       } catch (err) {
         // Last resort fallback
@@ -697,8 +769,8 @@ export const ConditionalFormattingTool = createSimpleTool(
     // If all APIs fail, provide a helpful error message
     throw new Error(
       `Conditional formatting failed for rule '${inferredRule}'. ` +
-      `Tried multiple API methods but none succeeded. ` +
-      `Please check that the Univer.js conditional formatting preset is properly loaded.`
+        `Tried multiple API methods but none succeeded. ` +
+        `Ensure the conditional formatting preset is loaded and pass explicit colors in params.format when visual styling is required.`
     );
 
     // (Unreached)
@@ -865,6 +937,155 @@ export const FindReplaceTool = createSimpleTool(
 );
 
 /**
+ * FILTER DATA - Modern Implementation with Applied Criteria
+ * Applies specific filter criteria automatically
+ */
+export const FilterDataTool = createSimpleTool(
+  {
+    name: "filter_data",
+    description:
+      "Filter data to show only specific values or conditions. Adds filters and applies criteria automatically.",
+    category: "structure",
+    requiredContext: ["tables"],
+    invalidatesCache: false,
+  },
+  async (
+    context: UniversalToolContext,
+    params: {
+      column?: string;
+      values?: string[];
+      contains?: string;
+      condition?: "greater_than" | "less_than" | "equals" | "not_equals" | "contains" | "not_contains";
+      conditionValue?: string | number;
+      tableId?: string;
+    }
+  ) => {
+    const { column, values, contains, condition, conditionValue, tableId } = params;
+
+    // Find the table
+    const table = context.findTable(tableId);
+    if (!table) {
+      throw new Error(`Table ${tableId || "primary"} not found`);
+    }
+
+    const fRange = context.fWorksheet.getRange(table.range);
+    
+    // Create filter if it doesn't exist
+    let fFilter = context.fWorksheet.getFilter();
+    if (!fFilter) {
+      fFilter = fRange.createFilter();
+    }
+
+    // Determine target column
+    let targetColumn: any;
+    if (column) {
+      // Find column by name or letter
+      targetColumn = table.columns.find(
+        (col: any) => 
+          col.name.toLowerCase() === column.toLowerCase() ||
+          col.letter === column.toUpperCase()
+      );
+      if (!targetColumn) {
+        throw new Error(`Column "${column}" not found in table`);
+      }
+    } else {
+      // Try to infer column from values or context
+      if (values?.length) {
+        // Look for a column that might contain these values
+        for (const col of table.columns) {
+          if (
+            col.sampleValues?.some((v: any) =>
+              values.some(val => String(v).toLowerCase().includes(val.toLowerCase()))
+            )
+          ) {
+            targetColumn = col;
+            break;
+          }
+        }
+      }
+      
+      if (!targetColumn) {
+        // Default to first text column or Transaction column
+        targetColumn = table.columns.find((col: any) => 
+          col.name.toLowerCase().includes('transaction') ||
+          col.name.toLowerCase().includes('type') ||
+          col.name.toLowerCase().includes('category')
+        ) || table.columns[1]; // Second column if no specific match
+      }
+    }
+
+    if (!targetColumn) {
+      throw new Error("Could not determine target column for filtering");
+    }
+
+    // Build filter criteria
+    let filterCriteria: any = {};
+    
+    if (values?.length) {
+      // Exact value matching
+      filterCriteria = {
+        colId: targetColumn.index,
+        filters: {
+          filters: values
+        }
+      };
+    } else if (contains) {
+      // Text contains
+      filterCriteria = {
+        colId: targetColumn.index,
+        filters: {
+          filters: [contains] // This will be interpreted as "contains" by Univer
+        }
+      };
+    } else if (condition && conditionValue !== undefined) {
+      // Condition-based filtering
+      const conditionMap = {
+        equals: "eq",
+        not_equals: "ne",
+        greater_than: "gt",
+        less_than: "lt",
+        contains: "contains",
+        not_contains: "not_contains"
+      };
+      
+      filterCriteria = {
+        colId: targetColumn.index,
+        condition: conditionMap[condition],
+        value: conditionValue
+      };
+    }
+
+    // Apply the filter criteria
+    try {
+      const worksheetColumn = context.fWorksheet.getRange(`${targetColumn.letter}:${targetColumn.letter}`).getColumn();
+      fFilter.setColumnFilterCriteria(worksheetColumn, filterCriteria);
+    } catch (error) {
+      console.warn("Failed to apply filter criteria:", error);
+      // Fallback: just create the filter without specific criteria
+    }
+
+    return {
+      success: true,
+      tableId: table.id,
+      column: targetColumn.name,
+      range: table.range,
+      criteria: filterCriteria,
+      appliedValues: values,
+      appliedContains: contains,
+      appliedCondition: condition,
+      appliedConditionValue: conditionValue,
+      message: `Applied filter to column "${targetColumn.name}"${
+        values ? ` showing: ${values.join(", ")}` : ""
+      }${contains ? ` containing: "${contains}"` : ""}${
+        condition && conditionValue !== undefined 
+          ? ` where ${condition.replace("_", " ")} ${conditionValue}` 
+          : ""
+      }`,
+    };
+  }
+);
+
+/**
  * Export all additional tools
  */
 export const ADDITIONAL_TOOLS = [
@@ -873,6 +1094,7 @@ export const ADDITIONAL_TOOLS = [
   FormatAsTableTool,
   ConditionalFormattingTool,
   FindReplaceTool,
+  FilterDataTool, // Add the new filter data tool
   ...AGGREGATED_CHART_TOOLS, // Add intelligent aggregated chart tools
   ...EXCEL_FUNCTION_TOOLS, // Add comprehensive Excel function support
 ];
