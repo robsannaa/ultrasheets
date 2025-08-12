@@ -56,6 +56,7 @@ export function Univer() {
     // Dynamic imports to avoid SSR issues
     const initializeUniver = async () => {
       // Import facade APIs to enable FRange.sort and FWorksheet.sort
+      // Note: Conditional formatting is built into the preset, no separate facade needed
       try {
         await import("@univerjs/sheets-formula/facade");
         await import("@univerjs/sheets-sort/facade");

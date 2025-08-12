@@ -423,8 +423,7 @@ export const ConditionalFormattingTool = createSimpleTool(
     console.log(`🎨 Creating conditional formatting rule for range: ${range}`);
     console.log(`🎨 Condition: ${condition}, Value: ${value}, Format:`, format);
 
-    try {
-      // Parse range to get coordinates for conditional formatting
+    // Parse range to get coordinates for conditional formatting
       const rangeMatch = range.match(/([A-Z]+)(\d+):([A-Z]+)(\d+)/);
       if (!rangeMatch) {
         throw new Error(`Invalid range format: ${range}`);
@@ -445,15 +444,9 @@ export const ConditionalFormattingTool = createSimpleTool(
       // Create a new conditional formatting rule using Univer.js CF API
       let rule = context.fWorksheet.newConditionalFormattingRule();
 
-      // Set the range for the rule using coordinate object
-      rule = rule.setRanges([
-        {
-          startRow: startRowIndex,
-          endRow: endRowIndex,
-          startColumn: startColIndex,
-          endColumn: endColIndex,
-        },
-      ]);
+      // Set the range for the rule using FRange object
+      const fRange = context.fWorksheet.getRange(range);
+      rule = rule.setRanges([fRange.getRange()]);
 
       // Apply the condition based on type
       switch (condition) {
@@ -543,132 +536,6 @@ export const ConditionalFormattingTool = createSimpleTool(
         ruleId,
         message: `Applied conditional formatting rule to ${range} based on '${condition}' condition using Univer.js CF API`,
       };
-    } catch (error) {
-      console.error(`❌ Failed to apply conditional formatting:`, error);
-
-      // Fallback to legacy cell-by-cell formatting if CF API fails
-      console.log(`🔄 Attempting fallback to direct cell formatting...`);
-
-      const rangeMatch = range.match(/([A-Z]+)(\d+):([A-Z]+)(\d+)/);
-      if (!rangeMatch) {
-        throw new Error(`Invalid range format: ${range}`);
-      }
-
-      const [, startCol, startRow, endCol, endRow] = rangeMatch;
-      const startRowIndex = parseInt(startRow) - 1;
-      const endRowIndex = parseInt(endRow) - 1;
-      const startColIndex =
-        startCol
-          .split("")
-          .reduce((acc, char) => acc * 26 + (char.charCodeAt(0) - 64), 0) - 1;
-      const endColIndex =
-        endCol
-          .split("")
-          .reduce((acc, char) => acc * 26 + (char.charCodeAt(0) - 64), 0) - 1;
-
-      const cellData = context.activeSheetSnapshot.cellData || {};
-      const formattedCells = [];
-
-      // Apply formatting logic manually to matching cells
-      for (let row = startRowIndex; row <= endRowIndex; row++) {
-        const rowData = cellData[row] || {};
-        for (let col = startColIndex; col <= endColIndex; col++) {
-          const cell = rowData[col];
-          if (!cell) continue;
-
-          let shouldFormat = false;
-          const cellValue = cell.v;
-
-          switch (condition) {
-            case "greater_than":
-              shouldFormat =
-                typeof cellValue === "number" &&
-                typeof value === "number" &&
-                cellValue > value;
-              break;
-            case "less_than":
-              shouldFormat =
-                typeof cellValue === "number" &&
-                typeof value === "number" &&
-                cellValue < value;
-              break;
-            case "equal_to":
-              shouldFormat = cellValue === value;
-              break;
-            case "between":
-              shouldFormat =
-                typeof cellValue === "number" &&
-                typeof value === "number" &&
-                typeof value2 === "number" &&
-                cellValue >= Math.min(value, value2) &&
-                cellValue <= Math.max(value, value2);
-              break;
-            case "contains":
-              shouldFormat =
-                typeof cellValue === "string" &&
-                typeof value === "string" &&
-                cellValue.toLowerCase().includes(value.toLowerCase());
-              break;
-            case "not_empty":
-              shouldFormat = cellValue != null && cellValue !== "";
-              break;
-            case "empty":
-              shouldFormat = cellValue == null || cellValue === "";
-              break;
-          }
-
-          if (shouldFormat) {
-            const colLetter = String.fromCharCode(65 + col);
-            const cellAddress = `${colLetter}${row + 1}`;
-            const cellRange = context.fWorksheet.getRange(cellAddress);
-
-            try {
-              // Apply formatting
-              if (format.backgroundColor) {
-                cellRange.setBackgroundColor(format.backgroundColor);
-              }
-              if (format.fontColor) {
-                cellRange.setFontColor(format.fontColor);
-              }
-              if (format.bold) {
-                cellRange.setBold(true);
-              }
-              if (format.italic) {
-                cellRange.setItalic(true);
-              }
-
-              formattedCells.push({
-                address: cellAddress,
-                value: cellValue,
-              });
-            } catch (cellError) {
-              console.warn(
-                `⚠️ Failed to format cell ${cellAddress}:`,
-                cellError
-              );
-            }
-          }
-        }
-      }
-
-      return {
-        success: true,
-        range,
-        condition,
-        conditionValue: value,
-        conditionValue2: value2,
-        format,
-        formattedCells,
-        totalFormatted: formattedCells.length,
-        message: `Applied conditional formatting to ${
-          formattedCells.length
-        } cells in ${range} using fallback method. Original CF API error: ${String(
-          (error as Error)?.message || error
-        )}`,
-        fallbackUsed: true,
-        originalError: String((error as Error)?.message || error),
-      };
-    }
   }
 );
 
