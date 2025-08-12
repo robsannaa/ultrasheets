@@ -55,15 +55,8 @@ export function Univer() {
 
     // Dynamic imports to avoid SSR issues
     const initializeUniver = async () => {
-      // Import facade APIs to enable FRange.sort and FWorksheet.sort
-      // Note: Conditional formatting is built into the preset, no separate facade needed
-      try {
-        await import("@univerjs/sheets-formula/facade");
-        await import("@univerjs/sheets-sort/facade");
-        await import("@univerjs/sheets-filter/facade");
-      } catch (e) {
-        console.warn("Facade imports failed:", e);
-      }
+      // IMPORTANT: Preset mode only. Do NOT import facades in preset mode,
+      // as it double-registers plugins and breaks DI (redi errors).
       const { UniverSheetsCorePreset } = await import(
         "@univerjs/preset-sheets-core"
       );
@@ -114,7 +107,7 @@ export function Univer() {
       } = await import("@univerjs/presets");
       // LifecycleStages import removed; no lifecycle hook needed
 
-      // Re-enable filter and sort presets with proper error handling
+      // Enable filter and sort presets with proper error handling
       let filterPreset = null;
       let filterLocales = null;
       try {
