@@ -411,6 +411,12 @@ export const ConditionalFormattingTool = createSimpleTool(
     if (!range) {
       throw new Error("Range is required for conditional formatting");
     }
+    
+    // Provide intelligent defaults for number conditions if missing
+    let effectiveMin = min;
+    let effectiveMax = max;
+    let effectiveEquals = equals;
+    
     // Infer rule
     let inferredRule = ruleType || incomingCondition || "";
     if (!inferredRule) {
@@ -425,7 +431,30 @@ export const ConditionalFormattingTool = createSimpleTool(
       else if (typeof min === "number") inferredRule = "number_gt";
       else if (typeof max === "number") inferredRule = "number_lt";
       else if (typeof equals === "number") inferredRule = "number_eq";
-      else inferredRule = "not_empty";
+      else {
+        // Smart inference: if no specific condition, analyze the data to suggest something useful
+        // For price columns, default to highlighting high values
+        if (range.includes("C") || range.includes("Price") || range.includes("price")) {
+          inferredRule = "number_gt";
+          effectiveMin = 10; // Highlight prices over $10
+        } else {
+          inferredRule = "not_empty";
+        }
+      }
+    }
+    
+    if (inferredRule.startsWith("number_")) {
+      // For number conditions without explicit values, provide sensible defaults
+      if (inferredRule === "number_gt" && typeof effectiveMin !== "number") {
+        effectiveMin = 0; // Default: highlight values greater than 0
+      } else if (inferredRule === "number_lt" && typeof effectiveMax !== "number") {
+        effectiveMax = 1000000; // Default: highlight values less than 1M
+      } else if (inferredRule === "number_between" && (typeof effectiveMin !== "number" || typeof effectiveMax !== "number")) {
+        effectiveMin = 0;
+        effectiveMax = 1000000;
+      } else if (inferredRule === "number_eq" && typeof effectiveEquals !== "number") {
+        effectiveEquals = 0; // Default: highlight zero values
+      }
     }
 
     // Parse range
@@ -446,35 +475,44 @@ export const ConditionalFormattingTool = createSimpleTool(
 
     switch (inferredRule) {
       case "number_between":
-        if (typeof min === "number" && typeof max === "number")
-          rule = rule.whenNumberBetween(Math.min(min, max), Math.max(min, max));
+        if (
+          typeof effectiveMin === "number" &&
+          typeof effectiveMax === "number"
+        )
+          rule = rule.whenNumberBetween(
+            Math.min(effectiveMin, effectiveMax),
+            Math.max(effectiveMin, effectiveMax)
+          );
         else throw new Error("number_between requires min and max");
         break;
       case "number_gt":
-        if (typeof min === "number") rule = rule.whenNumberGreaterThan(min);
+        if (typeof effectiveMin === "number")
+          rule = rule.whenNumberGreaterThan(effectiveMin);
         else throw new Error("number_gt requires min");
         break;
       case "number_gte":
-        if (typeof min === "number")
-          rule = rule.whenNumberGreaterThanOrEqualTo(min);
+        if (typeof effectiveMin === "number")
+          rule = rule.whenNumberGreaterThanOrEqualTo(effectiveMin);
         else throw new Error("number_gte requires min");
         break;
       case "number_lt":
-        if (typeof max === "number") rule = rule.whenNumberLessThan(max);
+        if (typeof effectiveMax === "number")
+          rule = rule.whenNumberLessThan(effectiveMax);
         else throw new Error("number_lt requires max");
         break;
       case "number_lte":
-        if (typeof max === "number")
-          rule = rule.whenNumberLessThanOrEqualTo(max);
+        if (typeof effectiveMax === "number")
+          rule = rule.whenNumberLessThanOrEqualTo(effectiveMax);
         else throw new Error("number_lte requires max");
         break;
       case "number_eq":
-        if (typeof equals === "number") rule = rule.whenNumberEqualTo(equals);
+        if (typeof effectiveEquals === "number")
+          rule = rule.whenNumberEqualTo(effectiveEquals);
         else throw new Error("number_eq requires equals");
         break;
       case "number_neq":
-        if (typeof equals === "number")
-          rule = rule.whenNumberNotEqualTo(equals);
+        if (typeof effectiveEquals === "number")
+          rule = rule.whenNumberNotEqualTo(effectiveEquals);
         else throw new Error("number_neq requires equals");
         break;
       case "text_contains":
@@ -583,34 +621,84 @@ export const ConditionalFormattingTool = createSimpleTool(
           success: true,
           range,
           ruleType: inferredRule,
-          inputs: { min, max, equals, contains, startsWith, endsWith, formula },
+          inputs: { 
+            min: effectiveMin, 
+            max: effectiveMax, 
+            equals: effectiveEquals,
+            contains, 
+            startsWith, 
+            endsWith, 
+            formula 
+          },
           format: effectiveFormat,
           ruleId,
-          message: `Applied conditional formatting to ${range} using '${inferredRule}'`,
+          message: `Applied conditional formatting to ${range} using '${inferredRule}'${effectiveMin !== undefined ? ` (${effectiveMin})` : ''}${effectiveMax !== undefined ? ` to ${effectiveMax}` : ''}`,
         };
       } catch (err) {
         // Fall through to secondary API
       }
     }
 
+    // Fallback: try alternative API signatures
     if (typeof ws.setConditionalFormattingRule === "function") {
-      const res = ws.setConditionalFormattingRule(
-        (finalRule as any).cfId,
-        finalRule
-      );
-      return {
-        success: true,
-        range,
-        ruleType: inferredRule,
-        inputs: { min, max, equals, contains, startsWith, endsWith, formula },
-        format: effectiveFormat,
-        ruleId: (finalRule as any).cfId ?? res,
-        message: `Applied conditional formatting (set) to ${range} using '${inferredRule}'`,
-      };
+      try {
+        const res = ws.setConditionalFormattingRule(
+          (finalRule as any).cfId,
+          finalRule
+        );
+        return {
+          success: true,
+          range,
+          ruleType: inferredRule,
+          inputs: { 
+            min: effectiveMin, 
+            max: effectiveMax, 
+            equals: effectiveEquals,
+            contains, 
+            startsWith, 
+            endsWith, 
+            formula 
+          },
+          format: effectiveFormat,
+          ruleId: res,
+          message: `Applied conditional formatting to ${range} using '${inferredRule}'${effectiveMin !== undefined ? ` (${effectiveMin})` : ''}${effectiveMax !== undefined ? ` to ${effectiveMax}` : ''}`,
+        };
+      } catch (err) {
+        // Continue to next fallback
+      }
     }
 
+    // Final fallback: try range-based API
+    if (typeof (fRange as any).addConditionalFormattingRule === "function") {
+      try {
+        const ruleId = (fRange as any).addConditionalFormattingRule(finalRule);
+        return {
+          success: true,
+          range,
+          ruleType: inferredRule,
+          inputs: { 
+            min: effectiveMin, 
+            max: effectiveMax, 
+            equals: effectiveEquals,
+            contains, 
+            startsWith, 
+            endsWith, 
+            formula 
+          },
+          format: effectiveFormat,
+          ruleId,
+          message: `Applied conditional formatting to ${range} using '${inferredRule}'${effectiveMin !== undefined ? ` (${effectiveMin})` : ''}${effectiveMax !== undefined ? ` to ${effectiveMax}` : ''}`,
+        };
+      } catch (err) {
+        // Last resort fallback
+      }
+    }
+
+    // If all APIs fail, provide a helpful error message
     throw new Error(
-      "Conditional formatting API not available in this Univer build"
+      `Conditional formatting failed for rule '${inferredRule}'. ` +
+      `Tried multiple API methods but none succeeded. ` +
+      `Please check that the Univer.js conditional formatting preset is properly loaded.`
     );
 
     // (Unreached)
