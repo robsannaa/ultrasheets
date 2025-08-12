@@ -116,9 +116,41 @@ export const AddFilterTool = createSimpleTool(
     invalidatesCache: false,
   },
   async (context: UniversalToolContext, params: { tableId?: string }) => {
+    console.log(`🔍 AddFilterTool: Looking for table with ID: "${params.tableId}"`);
+    console.log(`🔍 Available tables:`, context.tables.map(t => ({ id: t.id, range: t.range })));
+    console.log(`🔍 Primary table:`, context.primaryTable?.id, context.primaryTable?.range);
+    
     const table = context.findTable(params.tableId);
     if (!table) {
-      throw new Error(`Table ${params.tableId || "primary"} not found`);
+      console.log(`❌ AddFilterTool: Table not found. Available table IDs: ${context.tables.map(t => t.id).join(', ')}`);
+      
+      // If no specific table ID and no primary table, try to use the first available table
+      if (!params.tableId && context.tables.length > 0) {
+        console.log(`🔄 AddFilterTool: No primary table found, using first available table: ${context.tables[0].id}`);
+        const fallbackTable = context.tables[0];
+        
+        const fallbackTableRange = fallbackTable.range;
+        const fallbackFRange = context.fWorksheet.getRange(fallbackTableRange);
+        
+        // Remove existing filter if any
+        let fallbackFFilter = fallbackFRange.getFilter();
+        if (fallbackFFilter) {
+          fallbackFFilter.remove();
+        }
+        
+        // Create new filter
+        fallbackFFilter = fallbackFRange.createFilter();
+        
+        return {
+          success: true,
+          tableId: fallbackTable.id,
+          range: fallbackTableRange,
+          message: `Added filter to table ${fallbackTable.id} at range ${fallbackTableRange} (fallback)`,
+          filterApplied: true,
+        };
+      }
+      
+      throw new Error(`Table ${params.tableId || "primary"} not found. Available tables: ${context.tables.map(t => t.id).join(', ')}`);
     }
 
     const tableRange = table.range;
@@ -430,6 +462,198 @@ export const GetWorkbookSnapshotTool = createSimpleTool(
 );
 
 /**
+ * SORTING TOOL - Modern Implementation using Univer Sheets Sort API
+ * Using the official Univer sorting facade API: FRange.sort() and FWorksheet.sort()
+ */
+export const SortTool = createSimpleTool(
+  {
+    name: "sort_table",
+    description: "Sort table data by specified column in ascending or descending order",
+    category: "structure", 
+    requiredContext: ["tables"],
+    invalidatesCache: false,
+  },
+  async (
+    context: UniversalToolContext,
+    params: {
+      tableId?: string;
+      column: string | number;
+      ascending?: boolean;
+      range?: string;
+    }
+  ) => {
+    const { tableId, column, ascending = true, range } = params;
+    
+    console.log(`🔍 SortTool: Sorting by column: ${column}, ascending: ${ascending}`);
+    
+    let targetRange: string;
+    let table: any = null;
+    
+    if (range) {
+      // Use explicit range
+      targetRange = range;
+    } else {
+      // Find table and use its range
+      table = context.findTable(tableId);
+      if (!table) {
+        console.log(`❌ SortTool: Table not found. Available table IDs: ${context.tables.map(t => t.id).join(', ')}`);
+        throw new Error(`Table ${tableId || "primary"} not found`);
+      }
+      targetRange = table.range;
+    }
+    
+    console.log(`🔍 SortTool: Using range: ${targetRange}`);
+    
+    // Convert column to index for sorting
+    let colIndex: number;
+    let columnName = column;
+    
+    if (typeof column === 'string' && column.match(/^[A-Z]+$/)) {
+      // Convert column letter to index (A=0, B=1, etc.)
+      colIndex = column.split('').reduce((acc, char) => acc * 26 + (char.charCodeAt(0) - 64), 0) - 1;
+    } else if (typeof column === 'string') {
+      // Try to find column by header name
+      if (!table) table = context.findTable(tableId);
+      const columnObj = table ? context.findColumn(column, tableId) : null;
+      if (columnObj) {
+        colIndex = columnObj.index; // Use the column index directly
+        columnName = columnObj.name;
+        console.log(`🔍 SortTool: Found column "${columnName}" at index ${colIndex}`);
+      } else {
+        throw new Error(`Column "${column}" not found in table. Available columns: ${table?.columns?.map((c: any) => c.name).join(', ') || 'none'}`);
+      }
+    } else {
+      colIndex = column;
+    }
+    
+    console.log(`🔍 SortTool: Sorting by column index: ${colIndex}, ascending: ${ascending}`);
+    
+    try {
+      // Primary method: Use Univer's FRange.sort() API
+      const fRange = context.fWorksheet.getRange(targetRange);
+      
+      // Use the correct sort API according to Univer documentation
+      // FRange.sort({ column: index, ascending: boolean })
+      const sortResult = fRange.sort({ column: colIndex, ascending });
+      
+      console.log(`✅ SortTool: Range sort successful`);
+      
+      return {
+        success: true,
+        range: targetRange,
+        column: columnName,
+        columnIndex: colIndex,
+        ascending,
+        method: 'range',
+        message: `Sorted ${targetRange} by column ${columnName} in ${ascending ? 'ascending' : 'descending'} order`,
+        result: sortResult
+      };
+      
+    } catch (error) {
+      console.error(`❌ SortTool range sort error:`, error);
+      
+      // Fallback: try worksheet-level sort if range sort fails
+      try {
+        console.log(`🔄 SortTool: Trying worksheet sort fallback...`);
+        
+        // Use FWorksheet.sort(colIndex, ascending) API
+        const sortResult = context.fWorksheet.sort(colIndex, ascending);
+        
+        console.log(`✅ SortTool: Worksheet sort successful (fallback)`);
+        
+        return {
+          success: true,
+          range: targetRange,
+          column: columnName,
+          columnIndex: colIndex,
+          ascending,
+          method: 'worksheet',
+          message: `Sorted worksheet by column ${columnName} in ${ascending ? 'ascending' : 'descending'} order (worksheet fallback)`,
+          result: sortResult,
+          fallbackUsed: true
+        };
+        
+      } catch (fallbackError) {
+        console.error(`❌ SortTool fallback error:`, fallbackError);
+        
+        // Final attempt: Manual sort by reading/writing range values via Univer APIs
+        try {
+          console.log(`🔄 SortTool: Falling back to value-based sort and re-write...`);
+
+          // Compute relative column index within the target range
+          const match = targetRange.match(/([A-Z]+)(\d+):([A-Z]+)(\d+)/);
+          if (!match) {
+            throw new Error(`Invalid range format: ${targetRange}`);
+          }
+          const startColLetters = match[1];
+          const startColIndex = startColLetters
+            .split("")
+            .reduce((acc, ch) => acc * 26 + (ch.charCodeAt(0) - 64), 0) - 1; // 0-based
+          const relativeColIndex = colIndex - startColIndex;
+          console.log(`🔍 SortTool: Using relative column index: ${relativeColIndex}`);
+
+          const fRange = context.fWorksheet.getRange(targetRange);
+          const values = fRange.getValues();
+          if (!Array.isArray(values) || values.length === 0) {
+            throw new Error(`No values found in ${targetRange}`);
+          }
+
+          // Assume first row is header when table is detected
+          const header = values[0];
+          const rows = values.slice(1);
+
+          const coerce = (v: any) => {
+            if (v === null || v === undefined) return null;
+            // Try numeric first
+            const num = typeof v === 'number' ? v : Number(String(v).replace(/[^\d.-]+/g, ""));
+            if (!isNaN(num) && String(v).trim() !== "") return num;
+            return String(v);
+          };
+
+          rows.sort((a: any[], b: any[]) => {
+            const av = coerce(a[relativeColIndex]);
+            const bv = coerce(b[relativeColIndex]);
+            if (av === null && bv === null) return 0;
+            if (av === null) return ascending ? 1 : -1;
+            if (bv === null) return ascending ? -1 : 1;
+            if (typeof av === 'number' && typeof bv === 'number') {
+              return ascending ? av - bv : bv - av;
+            }
+            const cmp = String(av).localeCompare(String(bv), undefined, { numeric: true, sensitivity: 'base' });
+            return ascending ? cmp : -cmp;
+          });
+
+          const newValues = [header, ...rows];
+          fRange.setValues(newValues);
+
+          try {
+            const formula = context.univerAPI.getFormula();
+            formula.executeCalculation();
+          } catch {}
+
+          console.log(`✅ SortTool: Manual value-based sort successful`);
+
+          return {
+            success: true,
+            range: targetRange,
+            column: columnName,
+            columnIndex: relativeColIndex,
+            ascending,
+            method: 'value-rewrite',
+            message: `Sorted ${targetRange} by column ${columnName} in ${ascending ? 'ascending' : 'descending'} order (value rewrite)`,
+            fallbackUsed: true
+          };
+          
+        } catch (altError) {
+          console.error(`❌ SortTool alternative method error:`, altError);
+          throw new Error(`All sorting methods failed. Primary error: ${error.message}. Fallback error: ${fallbackError.message}. Alternative error: ${altError.message}`);
+        }
+      }
+    }
+  }
+);
+
+/**
  * Export all modern tools
  */
 export const MODERN_TOOLS = [
@@ -438,4 +662,5 @@ export const MODERN_TOOLS = [
   FormatCurrencyColumnTool,
   GenerateChartTool,
   GetWorkbookSnapshotTool,
+  SortTool,
 ];
