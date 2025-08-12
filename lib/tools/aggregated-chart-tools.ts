@@ -462,7 +462,7 @@ function analyzeChartPrompt(prompt: string, table: any) {
 
   if (byMatch) {
     const groupCandidate = byMatch[1];
-    groupByColumn = columns.find(c => c.lower.includes(groupCandidate))?.name;
+    groupByColumn = columns.find((c: { name: string; lower: string }) => c.lower.includes(groupCandidate))?.name;
   }
 
   // If no "by" found, look for common grouping words
@@ -470,7 +470,7 @@ function analyzeChartPrompt(prompt: string, table: any) {
     const groupingKeywords = ["product", "category", "region", "month", "day", "type", "brand"];
     for (const keyword of groupingKeywords) {
       if (lower.includes(keyword)) {
-        groupByColumn = columns.find(c => c.lower.includes(keyword))?.name;
+        groupByColumn = columns.find((c: { name: string; lower: string }) => c.lower.includes(keyword))?.name;
         if (groupByColumn) break;
       }
     }
@@ -482,7 +482,7 @@ function analyzeChartPrompt(prompt: string, table: any) {
   
   for (const keyword of valueKeywords) {
     if (lower.includes(keyword)) {
-      valueColumn = columns.find(c => c.lower.includes(keyword))?.name;
+      valueColumn = columns.find((c: { name: string; lower: string }) => c.lower.includes(keyword))?.name;
       if (valueColumn) break;
     }
   }
@@ -490,14 +490,14 @@ function analyzeChartPrompt(prompt: string, table: any) {
   // Fallbacks
   if (!groupByColumn) {
     // Use first text/categorical column
-    groupByColumn = columns.find(c => 
+    groupByColumn = columns.find((c: { name: string; lower: string }) => 
       !["price", "cost", "amount", "value", "rating", "score"].some(k => c.lower.includes(k))
     )?.name || columns[0]?.name;
   }
 
   if (!valueColumn) {
     // Use first numeric-sounding column
-    valueColumn = columns.find(c => 
+    valueColumn = columns.find((c: { name: string; lower: string }) => 
       ["price", "cost", "amount", "value", "rating", "score", "sales"].some(k => c.lower.includes(k))
     )?.name || columns[columns.length - 1]?.name;
   }

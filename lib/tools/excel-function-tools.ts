@@ -21,7 +21,7 @@ export const SmartFormulaBuilderTool = createSimpleTool(
   {
     name: "smart_formula_builder",
     description: "Build Excel formulas intelligently with context-aware range detection",
-    category: "formula",
+    category: "data",
     requiredContext: ["tables", "columns", "spatial"],
     invalidatesCache: false,
   },
@@ -489,7 +489,7 @@ function findOptimalFormulaPlacement(context: UniversalToolContext, suggestion: 
     
     case "adjacent_column":
       // Find empty column next to the table
-      const adjacentPlacement = context.findOptimalPlacement(1, 1, "right");
+      const adjacentPlacement = context.findOptimalPlacement(1, 1);
       return adjacentPlacement.range.split(":")[0];
     
     default:
@@ -555,7 +555,7 @@ export const BulkFormulaApplierTool = createSimpleTool(
   {
     name: "bulk_formula_applier",
     description: "Apply multiple Excel formulas efficiently in batch",
-    category: "formula",
+    category: "data",
     requiredContext: ["tables", "columns"],
     invalidatesCache: true,
   },
