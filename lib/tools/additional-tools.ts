@@ -442,8 +442,8 @@ export const ConditionalFormattingTool = createSimpleTool(
 
     // Build rule per docs [Conditional Formatting Facade API]
     // https://docs.univer.ai/guides/sheets/features/conditional-formatting
-      let rule = context.fWorksheet.newConditionalFormattingRule();
-      
+    let rule = context.fWorksheet.newConditionalFormattingRule();
+
     switch (inferredRule) {
       case "number_between":
         if (typeof min === "number" && typeof max === "number")
@@ -476,33 +476,33 @@ export const ConditionalFormattingTool = createSimpleTool(
         if (typeof equals === "number")
           rule = rule.whenNumberNotEqualTo(equals);
         else throw new Error("number_neq requires equals");
-          break;
+        break;
       case "text_contains":
         if (typeof contains === "string")
           rule = rule.whenTextContains(contains);
         else throw new Error("text_contains requires 'contains'");
-          break;
+        break;
       case "text_not_contains":
         if (typeof contains === "string")
           rule = rule.whenTextDoesNotContain(contains);
         else throw new Error("text_not_contains requires 'contains'");
-          break;
+        break;
       case "text_starts_with":
         if (typeof startsWith === "string")
           rule = rule.whenTextStartsWith(startsWith);
         else throw new Error("text_starts_with requires 'startsWith'");
-          break;
+        break;
       case "text_ends_with":
         if (typeof endsWith === "string")
           rule = rule.whenTextEndsWith(endsWith);
         else throw new Error("text_ends_with requires 'endsWith'");
-          break;
-        case "not_empty":
-          rule = rule.whenCellNotEmpty();
-          break;
-        case "empty":
-          rule = rule.whenCellEmpty();
-          break;
+        break;
+      case "not_empty":
+        rule = rule.whenCellNotEmpty();
+        break;
+      case "empty":
+        rule = rule.whenCellEmpty();
+        break;
       case "formula":
         if (typeof formula === "string" && formula.trim())
           rule = rule.whenFormulaSatisfied(formula);
@@ -549,8 +549,7 @@ export const ConditionalFormattingTool = createSimpleTool(
 
     // Apply formatting only for classic single-format rules; bars/scales/icon sets manage visuals themselves
     const isVisualScaleRule =
-      inferredRule === "data_bar" ||
-      inferredRule === "color_scale";
+      inferredRule === "data_bar" || inferredRule === "color_scale";
     const canStyle =
       !isVisualScaleRule &&
       typeof (rule as any).setBackground === "function" &&
@@ -564,9 +563,7 @@ export const ConditionalFormattingTool = createSimpleTool(
           format?.italic
       );
       if (!hasAnyFormat) {
-        rule = (rule as any)
-          .setBackground("#FFEBEE")
-          .setFontColor("#000000");
+        rule = (rule as any).setBackground("#FFEBEE").setFontColor("#000000");
         effectiveFormat = { backgroundColor: "#FFEBEE", fontColor: "#000000" };
       } else {
         if (format.backgroundColor)
@@ -581,43 +578,67 @@ export const ConditionalFormattingTool = createSimpleTool(
       }
     }
 
-      const builtRule = rule.build();
-
-    // Prefer worksheet API per docs; attach ranges if the rule lacks them
+    // If the builder supports explicit range binding, set it before build
     const fRange = context.fWorksheet.getRange(range);
-    const rawRange = (fRange as any).getRange
-      ? (fRange as any).getRange()
-      : undefined;
-    const finalRule =
-      rawRange && !(builtRule as any)?.ranges?.length
-        ? { ...(builtRule as any), ranges: [rawRange] }
-        : builtRule;
+    if (typeof (rule as any).setRanges === "function") {
+      try {
+        rule = (rule as any).setRanges([fRange]);
+      } catch {}
+    }
+    const builtRule = rule.build();
 
-    let ruleId: any;
-    if (
-      typeof (context.fWorksheet as any).addConditionalFormattingRule ===
-      "function"
-    ) {
-      ruleId = (context.fWorksheet as any).addConditionalFormattingRule(
-        finalRule
-      );
-    } else if (
-      typeof (fRange as any).addConditionalFormattingRule === "function"
-    ) {
-      ruleId = (fRange as any).addConditionalFormattingRule(finalRule);
-    } else {
-      throw new Error(
-        "Conditional formatting API not available in this Univer version"
-      );
+    // Apply rule using robust signature attempts, preferring Range API
+    let ruleId: any = undefined;
+    let applied = false;
+    const ws: any = context.fWorksheet as any;
+    try {
+      if (typeof (fRange as any).addConditionalFormattingRule === "function") {
+        ruleId = (fRange as any).addConditionalFormattingRule(builtRule);
+        applied = true;
+      }
+    } catch {}
+    if (!applied) {
+      try {
+        if (typeof ws.addConditionalFormattingRule === "function") {
+          // Try common signatures
+          try {
+            ruleId = ws.addConditionalFormattingRule(fRange, builtRule);
+            applied = true;
+          } catch {}
+          if (!applied) {
+            try {
+              ruleId = ws.addConditionalFormattingRule(builtRule, fRange);
+              applied = true;
+            } catch {}
+          }
+          if (!applied) {
+            try {
+              ruleId = ws.addConditionalFormattingRule(builtRule);
+              applied = true;
+            } catch {}
+          }
+        }
+      } catch {}
+    }
+    if (!applied) {
+      try {
+        if (typeof ws.setConditionalFormattingRule === "function") {
+          ruleId = ws.setConditionalFormattingRule(builtRule);
+          applied = true;
+        }
+      } catch {}
+    }
+    if (!applied) {
+      throw new Error("Failed to apply conditional formatting rule using available APIs");
     }
 
-      return {
-        success: true,
-        range,
+    return {
+      success: true,
+      range,
       ruleType: inferredRule,
       inputs: { min, max, equals, contains, startsWith, endsWith, formula },
       format: effectiveFormat,
-        ruleId,
+      ruleId,
       message: `Applied conditional formatting to ${range} using '${inferredRule}'`,
     };
   }
@@ -771,8 +792,8 @@ export const FindReplaceTool = createSimpleTool(
       formula.executeCalculation();
     } catch {}
 
-      return {
-        success: true,
+    return {
+      success: true,
       range: targetRange,
       replacements,
       cellsUpdated: updatedCells.length,
