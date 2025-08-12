@@ -442,14 +442,7 @@ export const ConditionalFormattingTool = createSimpleTool(
 
     // Build rule per docs [Conditional Formatting Facade API]
     // https://docs.univer.ai/guides/sheets/features/conditional-formatting
-    let rule = context.fWorksheet.newConditionalFormattingRule().setRanges([
-      {
-        startRow: startRowIndex,
-        endRow: endRowIndex,
-        startColumn: startColIndex,
-        endColumn: endColIndex,
-      },
-    ]);
+    let rule = context.fWorksheet.newConditionalFormattingRule();
 
     switch (inferredRule) {
       case "number_between":
@@ -531,22 +524,61 @@ export const ConditionalFormattingTool = createSimpleTool(
         throw new Error(`Unsupported ruleType: ${inferredRule}`);
     }
 
-    // Apply formatting attributes
-    if (format.backgroundColor)
-      rule = rule.setBackground(format.backgroundColor);
-    if (format.fontColor) rule = rule.setFontColor(format.fontColor);
-    if (format.bold) rule = rule.setBold(true);
-    if (format.italic) rule = rule.setItalic(true);
+    // Apply formatting attributes (default if none provided)
+    const hasAnyFormat = Boolean(
+      format?.backgroundColor ||
+        format?.fontColor ||
+        format?.bold ||
+        format?.italic
+    );
+    if (!hasAnyFormat) {
+      rule = rule.setBackground("#FFEBEE").setFontColor("#000000");
+    } else {
+      if (format.backgroundColor)
+        rule = rule.setBackground(format.backgroundColor);
+      if (format.fontColor) rule = rule.setFontColor(format.fontColor);
+      if (format.bold) rule = rule.setBold(true);
+      if (format.italic) rule = rule.setItalic(true);
+    }
 
     const builtRule = rule.build();
-    const ruleId = context.fWorksheet.addConditionalFormattingRule(builtRule);
+
+    // Prefer worksheet API per docs; attach ranges if the rule lacks them
+    const fRange = context.fWorksheet.getRange(range);
+    const rawRange = (fRange as any).getRange
+      ? (fRange as any).getRange()
+      : undefined;
+    const finalRule =
+      rawRange && !(builtRule as any)?.ranges?.length
+        ? { ...(builtRule as any), ranges: [rawRange] }
+        : builtRule;
+
+    let ruleId: any;
+    if (
+      typeof (context.fWorksheet as any).addConditionalFormattingRule ===
+      "function"
+    ) {
+      ruleId = (context.fWorksheet as any).addConditionalFormattingRule(
+        finalRule
+      );
+    } else if (
+      typeof (fRange as any).addConditionalFormattingRule === "function"
+    ) {
+      ruleId = (fRange as any).addConditionalFormattingRule(finalRule);
+    } else {
+      throw new Error(
+        "Conditional formatting API not available in this Univer version"
+      );
+    }
 
     return {
       success: true,
       range,
       ruleType: inferredRule,
       inputs: { min, max, equals, contains, startsWith, endsWith, formula },
-      format,
+      format: hasAnyFormat
+        ? format
+        : { backgroundColor: "#FFEBEE", fontColor: "#000000" },
       ruleId,
       message: `Applied conditional formatting to ${range} using '${inferredRule}'`,
     };
@@ -684,7 +716,7 @@ export const FindReplaceTool = createSimpleTool(
         if (v == null) continue;
         if (typeof v === "string") {
           const before = v;
-          const after = before.replace(pattern, (m) => {
+          const after = before.replace(pattern, () => {
             replacements += 1;
             return replaceText;
           });

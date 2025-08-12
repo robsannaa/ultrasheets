@@ -717,18 +717,19 @@ export function ChatSidebar({ onMobileClose }: { onMobileClose?: () => void }) {
 
               if (!smartFormula && (targetRegion as any).semanticAnalysis) {
                 // Look for matching calculation in semantic analysis
-                const matchingCalc =
-                  (targetRegion as any).semanticAnalysis.possibleCalculations.find(
-                    (calc: any) =>
-                      calc.newColumnName.toLowerCase() ===
-                        columnName.toLowerCase() ||
-                      columnName
-                        .toLowerCase()
-                        .includes(calc.newColumnName.toLowerCase()) ||
-                      calc.newColumnName
-                        .toLowerCase()
-                        .includes(columnName.toLowerCase())
-                  );
+                const matchingCalc = (
+                  targetRegion as any
+                ).semanticAnalysis.possibleCalculations.find(
+                  (calc: any) =>
+                    calc.newColumnName.toLowerCase() ===
+                      columnName.toLowerCase() ||
+                    columnName
+                      .toLowerCase()
+                      .includes(calc.newColumnName.toLowerCase()) ||
+                    calc.newColumnName
+                      .toLowerCase()
+                      .includes(columnName.toLowerCase())
+                );
 
                 if (matchingCalc) {
                   smartFormula = matchingCalc.formula;
@@ -876,7 +877,7 @@ export function ChatSidebar({ onMobileClose }: { onMobileClose?: () => void }) {
       {!onMobileClose && (
         <div className="px-3 py-3 border-b">
           <div className="flex items-center justify-between">
-            <h2 className="text-base font-semibold">Spreadsheet Master 🧠</h2>
+            <h2 className="text-base font-semibold">CellChat 🧠</h2>
           </div>
         </div>
       )}
