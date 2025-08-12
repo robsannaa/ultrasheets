@@ -55,7 +55,14 @@ export function Univer() {
 
     // Dynamic imports to avoid SSR issues
     const initializeUniver = async () => {
-      // Skip facade imports for now - they cause service registration conflicts
+      // Import facade APIs to enable FRange.sort and FWorksheet.sort
+      try {
+        await import("@univerjs/sheets-formula/facade");
+        await import("@univerjs/sheets-sort/facade");
+        await import("@univerjs/sheets-filter/facade");
+      } catch (e) {
+        console.warn("Facade imports failed:", e);
+      }
       const { UniverSheetsCorePreset } = await import(
         "@univerjs/preset-sheets-core"
       );
@@ -106,7 +113,41 @@ export function Univer() {
       } = await import("@univerjs/presets");
       // LifecycleStages import removed; no lifecycle hook needed
 
-      // Skip filter and sort presets for now - they cause dependency injection issues
+      // Re-enable filter and sort presets with proper error handling
+      let filterPreset = null;
+      let filterLocales = null;
+      try {
+        const filterModule = await import("@univerjs/preset-sheets-filter");
+        const filterLocaleModule = await import(
+          "@univerjs/preset-sheets-filter/locales/en-US"
+        );
+        filterPreset = filterModule.UniverSheetsFilterPreset;
+        filterLocales = filterLocaleModule.default;
+        console.log("✅ Filter preset loaded successfully");
+      } catch (error) {
+        console.warn(
+          "⚠️ Filter preset not available, continuing without filters:",
+          error
+        );
+      }
+
+      // Re-enable sort preset with proper error handling
+      let sortPreset = null;
+      let sortLocales = null;
+      try {
+        const sortModule = await import("@univerjs/preset-sheets-sort");
+        const sortLocaleModule = await import(
+          "@univerjs/preset-sheets-sort/locales/en-US"
+        );
+        sortPreset = sortModule.UniverSheetsSortPreset;
+        sortLocales = sortLocaleModule.default;
+        console.log("✅ Sort preset loaded successfully");
+      } catch (error) {
+        console.warn(
+          "⚠️ Sort preset not available, continuing without sorting:",
+          error
+        );
+      }
 
       const corePreset = UniverSheetsCorePreset({
         container: containerRef.current,
@@ -134,7 +175,14 @@ export function Univer() {
         presets = [corePreset];
       }
 
-      // Filter and sort presets disabled for now to avoid dependency injection issues
+      // Add filter preset if available
+      if (filterPreset) {
+        presets.push(filterPreset());
+      }
+      // Add sort preset if available
+      if (sortPreset) {
+        presets.push(sortPreset());
+      }
       if (TablePreset) {
         presets.push(TablePreset());
       }
@@ -142,6 +190,8 @@ export function Univer() {
       let locales = mergeLocales(sheetsCoreEnUS);
       try {
         const additionalLocales = [
+          ...(filterLocales ? [filterLocales] : []),
+          ...(sortLocales ? [sortLocales] : []),
           ...(tableLocales ? [tableLocales] : []),
         ];
 
@@ -158,6 +208,8 @@ export function Univer() {
           e
         );
         const additionalLocales = [
+          ...(filterLocales ? [filterLocales] : []),
+          ...(sortLocales ? [sortLocales] : []),
           ...(tableLocales ? [tableLocales] : []),
         ];
 
@@ -168,8 +220,10 @@ export function Univer() {
       const removeUniverWatermark = (api: any) => {
         try {
           if (typeof api?.removeWatermark === "function") api.removeWatermark();
-          else if (typeof api?.deleteWatermark === "function") api.deleteWatermark();
-          else if (typeof api?.hideWatermark === "function") api.hideWatermark();
+          else if (typeof api?.deleteWatermark === "function")
+            api.deleteWatermark();
+          else if (typeof api?.hideWatermark === "function")
+            api.hideWatermark();
         } catch {}
       };
 
@@ -210,7 +264,9 @@ export function Univer() {
       univerAPI.createWorkbook({});
 
       // Attempt official watermark removal once
-      try { removeUniverWatermark(univerAPI); } catch {}
+      try {
+        removeUniverWatermark(univerAPI);
+      } catch {}
 
       // EXPOSE univerAPI GLOBALLY for chat component and guard flags
       (window as any).univerAPI = univerAPI;

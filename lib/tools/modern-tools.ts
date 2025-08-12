@@ -613,147 +613,25 @@ export const SortTool = createSimpleTool(
     console.log(
       `🔍 SortTool: Sorting by column index: ${colIndex}, ascending: ${ascending}`
     );
-    try {
-      // Use Univer's official FRange.sort() API - following docs religiously, no fallbacks
-      const fRange = context.fWorksheet.getRange(targetRange);
 
-      // According to official Univer docs: FRange.sort({ column: colIndex, ascending: boolean })
-      const sortResult = fRange.sort({ column: colIndex, ascending });
+    // Use Univer's official FRange.sort() API - following docs religiously, no fallbacks
+    const fRange = context.fWorksheet.getRange(targetRange);
+    const sortResult = fRange.sort({ column: colIndex, ascending });
 
-      console.log(`✅ SortTool: Successfully sorted ${targetRange}`);
+    console.log(`✅ SortTool: Successfully sorted ${targetRange}`);
 
-      return {
-        success: true,
-        range: targetRange,
-        column: columnName,
-        columnIndex: colIndex,
-        ascending,
-        method: "range",
-        message: `Sorted ${targetRange} by column ${columnName} in ${
-          ascending ? "ascending" : "descending"
-        } order`,
-        result: sortResult,
-      };
-    
-    } catch (error) {
-      console.error(`❌ SortTool range sort error:`, error);
-
-      // Fallback: try worksheet-level sort if range sort fails
-      try {
-        console.log(`🔄 SortTool: Trying worksheet sort fallback...`);
-
-        // Use FWorksheet.sort(colIndex, ascending) API
-        const sortResult = context.fWorksheet.sort(colIndex, ascending);
-
-        console.log(`✅ SortTool: Worksheet sort successful (fallback)`);
-
-        return {
-          success: true,
-          range: targetRange,
-          column: columnName,
-          columnIndex: colIndex,
-          ascending,
-          method: "worksheet",
-          message: `Sorted worksheet by column ${columnName} in ${
-            ascending ? "ascending" : "descending"
-          } order (worksheet fallback)`,
-          result: sortResult,
-          fallbackUsed: true,
-        };
-      } catch (fallbackError) {
-        console.error(`❌ SortTool fallback error:`, fallbackError);
-
-        // Final attempt: Manual sort by reading/writing range values via Univer APIs
-        try {
-          console.log(
-            `🔄 SortTool: Falling back to value-based sort and re-write...`
-          );
-
-          // Compute relative column index within the target range
-          const match = targetRange.match(/([A-Z]+)(\d+):([A-Z]+)(\d+)/);
-          if (!match) {
-            throw new Error(`Invalid range format: ${targetRange}`);
-          }
-          const startColLetters = match[1];
-          const startColIndex =
-            startColLetters
-              .split("")
-              .reduce((acc, ch) => acc * 26 + (ch.charCodeAt(0) - 64), 0) - 1; // 0-based
-          const relativeColIndex = colIndex - startColIndex;
-          console.log(
-            `🔍 SortTool: Using relative column index: ${relativeColIndex}`
-          );
-
-          const fRange = context.fWorksheet.getRange(targetRange);
-          const values = fRange.getValues();
-          if (!Array.isArray(values) || values.length === 0) {
-            throw new Error(`No values found in ${targetRange}`);
-          }
-
-          // Assume first row is header when table is detected
-          const header = values[0];
-          const rows = values.slice(1);
-
-          const coerce = (v: any) => {
-            if (v === null || v === undefined) return null;
-            // Try numeric first
-            const num =
-              typeof v === "number"
-                ? v
-                : Number(String(v).replace(/[^\d.-]+/g, ""));
-            if (!isNaN(num) && String(v).trim() !== "") return num;
-            return String(v);
-          };
-
-          rows.sort((a: any[], b: any[]) => {
-            const av = coerce(a[relativeColIndex]);
-            const bv = coerce(b[relativeColIndex]);
-            if (av === null && bv === null) return 0;
-            if (av === null) return ascending ? 1 : -1;
-            if (bv === null) return ascending ? -1 : 1;
-            if (typeof av === "number" && typeof bv === "number") {
-              return ascending ? av - bv : bv - av;
-            }
-            const cmp = String(av).localeCompare(String(bv), undefined, {
-              numeric: true,
-              sensitivity: "base",
-            });
-            return ascending ? cmp : -cmp;
-          });
-
-          const newValues = [header, ...rows];
-          fRange.setValues(newValues);
-
-          try {
-            const formula = context.univerAPI.getFormula();
-            formula.executeCalculation();
-          } catch {}
-
-          console.log(`✅ SortTool: Manual value-based sort successful`);
-
-          return {
-            success: true,
-            range: targetRange,
-            column: columnName,
-            columnIndex: relativeColIndex,
-            ascending,
-            method: "value-rewrite",
-            message: `Sorted ${targetRange} by column ${columnName} in ${
-              ascending ? "ascending" : "descending"
-            } order (value rewrite)`,
-            fallbackUsed: true,
-          };
-        } catch (altError) {
-          console.error(`❌ SortTool alternative method error:`, altError);
-          const primaryMsg = String((error as Error)?.message || error);
-          const fbMsg = String((fallbackError as Error)?.message || fallbackError);
-          const altMsg = String((altError as Error)?.message || altError);
-          throw new Error(
-            `All sorting methods failed. Primary error: ${primaryMsg}. Fallback error: ${fbMsg}. Alternative error: ${altMsg}`
-          );
-        }
-      }
-    }
+    return {
+      success: true,
+      range: targetRange,
+      column: columnName,
+      columnIndex: colIndex,
+      ascending,
+      method: "range",
+      message: `Sorted ${targetRange} by column ${columnName} in ${
+        ascending ? "ascending" : "descending"
+      } order`,
+      result: sortResult,
+    };
   }
 );
 

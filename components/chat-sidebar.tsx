@@ -261,14 +261,7 @@ export function ChatSidebar({ onMobileClose }: { onMobileClose?: () => void }) {
   React.useEffect(() => setMounted(true), []);
 
   // Auto-close mobile sidebar after successful actions
-  const handleSuccessfulAction = React.useCallback(() => {
-    if (onMobileClose) {
-      // Small delay to show the action completed
-      setTimeout(() => {
-        onMobileClose();
-      }, 1500);
-    }
-  }, [onMobileClose]);
+
   const getClientEnv = React.useCallback(() => {
     try {
       const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
@@ -876,7 +869,9 @@ export function ChatSidebar({ onMobileClose }: { onMobileClose?: () => void }) {
     (status === "streaming" && !assistantHasContent);
 
   return (
-    <div className={`h-full flex flex-col bg-background`}>
+    <div
+      className={`h-full flex flex-col bg-background border rounded-2xl m-1`}
+    >
       {/* Only show header on desktop */}
       {!onMobileClose && (
         <div className="px-3 py-3 border-b">
@@ -894,7 +889,7 @@ export function ChatSidebar({ onMobileClose }: { onMobileClose?: () => void }) {
         )}
       </div>
 
-      <div className={`${onMobileClose ? "p-3" : "px-3 py-3"} border-t`}>
+      <div className={`${onMobileClose ? "p-3" : "px-3 py-3"}`}>
         <ChatInput
           input={input}
           handleInputChange={handleInputChange}

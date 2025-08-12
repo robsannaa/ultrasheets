@@ -14,7 +14,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "CellChat",
+  title: "CellChat 🧠",
   description: "CellChat: Chat with your spreadsheet",
   icons: {
     icon: "/logo.png",

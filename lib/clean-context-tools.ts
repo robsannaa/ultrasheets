@@ -27,22 +27,6 @@ export interface CleanSheetContext {
       headers: string[];
       rowCount: number;
       columnTypes: Record<string, "text" | "number" | "date" | "formula">;
-      semanticAnalysis: {
-        possibleCalculations: Array<{
-          newColumnName: string;
-          formula: string;
-          description: string;
-          sourceColumns: string[];
-        }>;
-        relatedColumns: Record<string, string[]>;
-        patterns: {
-          hasPrice: boolean;
-          hasWeight: boolean;
-          hasQuantity: boolean;
-          hasDate: boolean;
-          hasCurrency: boolean;
-        };
-      };
     }>;
     emptyAreas: {
       nextColumns: string[];
@@ -172,22 +156,6 @@ function detectDataRegionsIntelligently(
     headers: string[];
     rowCount: number;
     columnTypes: Record<string, "text" | "number" | "date" | "formula">;
-    semanticAnalysis: {
-      possibleCalculations: Array<{
-        newColumnName: string;
-        formula: string;
-        description: string;
-        sourceColumns: string[];
-      }>;
-      relatedColumns: Record<string, string[]>;
-      patterns: {
-        hasPrice: boolean;
-        hasWeight: boolean;
-        hasQuantity: boolean;
-        hasDate: boolean;
-        hasCurrency: boolean;
-      };
-    };
   }> = [];
 
   // Look for header patterns (consecutive text cells in a row)
@@ -312,11 +280,6 @@ function analyzeTableRegion(
     );
   });
 
-  // Perform semantic analysis to understand relationships
-  const semanticAnalysis = performSemanticAnalysis(
-    headers.map((h) => h.value),
-    columnTypes
-  );
 
   const startColLetter = String.fromCharCode(65 + startCol);
   const endColLetter = String.fromCharCode(65 + endCol);
@@ -330,7 +293,6 @@ function analyzeTableRegion(
     headers: headers.map((h) => h.value),
     rowCount: dataRows,
     columnTypes,
-    semanticAnalysis,
   };
 }
 
@@ -455,192 +417,6 @@ function extractAllFormulas(cellData: any) {
   return formulas;
 }
 
-/**
- * Perform semantic analysis to understand column relationships and suggest calculations
- */
-function performSemanticAnalysis(
-  headers: string[],
-  columnTypes: Record<string, string>
-) {
-  const lowerHeaders = headers.map((h) => h.toLowerCase());
-
-  // Detect data patterns
-  const patterns = {
-    hasPrice: lowerHeaders.some(
-      (h) =>
-        h.includes("price") ||
-        h.includes("cost") ||
-        h.includes("zł") ||
-        h.includes("$") ||
-        h.includes("€")
-    ),
-    hasWeight: lowerHeaders.some(
-      (h) =>
-        h.includes("weight") ||
-        h.includes("kg") ||
-        h.includes("mass") ||
-        h.includes("gram")
-    ),
-    hasQuantity: lowerHeaders.some(
-      (h) =>
-        h.includes("quantity") ||
-        h.includes("qty") ||
-        h.includes("amount") ||
-        h.includes("count")
-    ),
-    hasDate: lowerHeaders.some(
-      (h) =>
-        h.includes("date") ||
-        h.includes("time") ||
-        h.includes("day") ||
-        h.includes("month")
-    ),
-    hasCurrency: lowerHeaders.some(
-      (h) =>
-        h.includes("zł") ||
-        h.includes("$") ||
-        h.includes("€") ||
-        h.includes("price") ||
-        h.includes("cost")
-    ),
-  };
-
-  // Find related columns
-  const relatedColumns: Record<string, string[]> = {};
-
-  // Detect possible calculations based on common business logic
-  const possibleCalculations: Array<{
-    newColumnName: string;
-    formula: string;
-    description: string;
-    sourceColumns: string[];
-  }> = [];
-
-  // Price per unit calculations
-  if (patterns.hasPrice && patterns.hasWeight) {
-    const priceCol = headers.find(
-      (h) =>
-        h.toLowerCase().includes("price") ||
-        h.toLowerCase().includes("cost") ||
-        h.toLowerCase().includes("zł")
-    );
-    const weightCol = headers.find(
-      (h) =>
-        h.toLowerCase().includes("weight") || h.toLowerCase().includes("kg")
-    );
-
-    if (priceCol && weightCol) {
-      const priceColLetter = String.fromCharCode(
-        65 + headers.indexOf(priceCol)
-      );
-      const weightColLetter = String.fromCharCode(
-        65 + headers.indexOf(weightCol)
-      );
-
-      possibleCalculations.push({
-        newColumnName: "Price per kg",
-        formula: `=IF(${weightColLetter}{row}=0,"",${priceColLetter}{row}/${weightColLetter}{row})`,
-        description: `Calculate price per kilogram by dividing ${priceCol} by ${weightCol} (with zero-division protection)`,
-        sourceColumns: [priceCol, weightCol],
-      });
-
-      relatedColumns[priceCol] = [weightCol];
-      relatedColumns[weightCol] = [priceCol];
-    }
-  }
-
-  // Price per quantity calculations
-  if (patterns.hasPrice && patterns.hasQuantity) {
-    const priceCol = headers.find(
-      (h) =>
-        h.toLowerCase().includes("price") || h.toLowerCase().includes("cost")
-    );
-    const qtyCol = headers.find(
-      (h) =>
-        h.toLowerCase().includes("quantity") || h.toLowerCase().includes("qty")
-    );
-
-    if (
-      priceCol &&
-      qtyCol &&
-      !possibleCalculations.some(
-        (calc) => calc.newColumnName === "Price per unit"
-      )
-    ) {
-      const priceColLetter = String.fromCharCode(
-        65 + headers.indexOf(priceCol)
-      );
-      const qtyColLetter = String.fromCharCode(65 + headers.indexOf(qtyCol));
-
-      possibleCalculations.push({
-        newColumnName: "Price per unit",
-        formula: `=IF(${qtyColLetter}{row}=0,"",${priceColLetter}{row}/${qtyColLetter}{row})`,
-        description: `Calculate price per unit by dividing ${priceCol} by ${qtyCol} (with zero-division protection)`,
-        sourceColumns: [priceCol, qtyCol],
-      });
-    }
-  }
-
-  // Total calculations (price * quantity)
-  if (patterns.hasPrice && patterns.hasQuantity) {
-    const priceCol = headers.find(
-      (h) =>
-        h.toLowerCase().includes("price") && !h.toLowerCase().includes("total")
-    );
-    const qtyCol = headers.find(
-      (h) =>
-        h.toLowerCase().includes("quantity") || h.toLowerCase().includes("qty")
-    );
-
-    if (
-      priceCol &&
-      qtyCol &&
-      !headers.some((h) => h.toLowerCase().includes("total"))
-    ) {
-      const priceColLetter = String.fromCharCode(
-        65 + headers.indexOf(priceCol)
-      );
-      const qtyColLetter = String.fromCharCode(65 + headers.indexOf(qtyCol));
-
-      possibleCalculations.push({
-        newColumnName: "Total Cost",
-        formula: `=${priceColLetter}{row}*${qtyColLetter}{row}`,
-        description: `Calculate total cost by multiplying ${priceCol} by ${qtyCol}`,
-        sourceColumns: [priceCol, qtyCol],
-      });
-    }
-  }
-
-  // Profit margin calculations
-  const costCol = headers.find(
-    (h) =>
-      h.toLowerCase().includes("cost") && !h.toLowerCase().includes("total")
-  );
-  const sellPriceCol = headers.find(
-    (h) =>
-      h.toLowerCase().includes("price") && !h.toLowerCase().includes("cost")
-  );
-
-  if (costCol && sellPriceCol) {
-    const costColLetter = String.fromCharCode(65 + headers.indexOf(costCol));
-    const priceColLetter = String.fromCharCode(
-      65 + headers.indexOf(sellPriceCol)
-    );
-
-    possibleCalculations.push({
-      newColumnName: "Profit Margin",
-      formula: `=(${priceColLetter}{row}-${costColLetter}{row})/${priceColLetter}{row}*100`,
-      description: `Calculate profit margin percentage`,
-      sourceColumns: [sellPriceCol, costCol],
-    });
-  }
-
-  return {
-    possibleCalculations,
-    relatedColumns,
-    patterns,
-  };
-}
 
 /**
  * Extract cell dependencies from formula

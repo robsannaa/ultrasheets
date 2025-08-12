@@ -348,7 +348,6 @@ CRITICAL COLUMN CONTEXT:
 - "format the column" means format the data in the most relevant column based on context
 - Use workbook intelligence to identify currency columns (Price, Cost, Amount, Revenue, etc.)
 - Format the DATA RANGE of the identified column, not empty cells or wrong columns
-- Example: "Price (zł)" column at G9:G18 should be formatted, not random empty column B
 
 IMPORTANT: Tools now automatically write results to the spreadsheet:
 - calculate_total places the sum in the next available cell in the same column
@@ -1169,6 +1168,51 @@ The tool intelligently finds the table and applies filters to the entire table r
           },
         }),
 
+        sort_table: tool({
+          description:
+            "Sort table data by specified column in ascending or descending order. Works with both column names and column letters.",
+          parameters: z.object({
+            tableId: z
+              .string()
+              .optional()
+              .describe(
+                "Optional table ID to target. If not specified, sorts the primary table."
+              ),
+            column: z
+              .union([z.string(), z.number()])
+              .describe(
+                "Column to sort by - can be column letter (e.g., 'E'), column name (e.g., 'Price'), or column index (0-based)"
+              ),
+            ascending: z
+              .boolean()
+              .optional()
+              .default(true)
+              .describe(
+                "Sort order - true for ascending, false for descending"
+              ),
+            range: z
+              .string()
+              .optional()
+              .describe(
+                "Optional explicit range to sort (e.g., 'C8:K12'). If not provided, uses table range."
+              ),
+          }),
+          execute: async ({ tableId, column, ascending = true, range }) => {
+            return {
+              message: `Sorting ${
+                range || `table ${tableId || "primary"}`
+              } by column ${column} in ${
+                ascending ? "ascending" : "descending"
+              } order...`,
+              clientSideAction: {
+                type: "executeUniverTool",
+                toolName: "sort_table",
+                params: { tableId, column, ascending, range },
+              },
+            };
+          },
+        }),
+
         format_cells: tool({
           description:
             "Apply text and number formatting to cells (bold, colors, fonts, date formats, etc.) - NOT for currency formatting",
@@ -1389,12 +1433,9 @@ The tool intelligently finds the table and applies filters to the entire table r
         }),
 
         create_sheet: tool({
-          description:
-            "Create a new worksheet in the workbook",
+          description: "Create a new worksheet in the workbook",
           parameters: z.object({
-            sheetName: z
-              .string()
-              .describe("Name of the new sheet to create"),
+            sheetName: z.string().describe("Name of the new sheet to create"),
             switchToSheet: z
               .boolean()
               .optional()
@@ -1405,7 +1446,9 @@ The tool intelligently finds the table and applies filters to the entire table r
           }),
           execute: async ({ sheetName, switchToSheet = true }) => {
             return {
-              message: `Creating sheet "${sheetName}"${switchToSheet ? ' and switching to it' : ''}...`,
+              message: `Creating sheet "${sheetName}"${
+                switchToSheet ? " and switching to it" : ""
+              }...`,
               clientSideAction: {
                 type: "executeUniverTool",
                 toolName: "create_sheet",

@@ -50,9 +50,7 @@ export default function Home() {
                 <div className="h-full flex flex-col">
                   {/* Header with close button */}
                   <div className="flex items-center justify-between p-4 rounded-t-2xl bg-background">
-                    <h2 className="text-lg font-semibold">
-                      Spreadsheet Master 🧠
-                    </h2>
+                    <h2 className="text-lg font-semibold">CellChat</h2>
                     <Button
                       onClick={() => setShowSidebar(false)}
                       size="icon"
@@ -80,24 +78,18 @@ export default function Home() {
   // Desktop Layout
   return (
     <SidebarProvider>
-      <div className="h-svh w-svw min-h-0 bg-background">
+      <div className="bg-background h-screen w-screen border-0 m-1">
         <ResizablePanelGroup direction="horizontal">
           <ResizablePanel
             defaultSize={82}
             minSize={60}
-            className="bg-background my-2 mx-1"
+            className="my-1 mx-1 border rounded-2xl"
           >
-            <div className="h-full w-full p-2">
-              <Univer />
-            </div>
+            <Univer />
           </ResizablePanel>
           <ResizableHandle withHandle />
-          <ResizablePanel defaultSize={18} minSize={15} maxSize={40}>
-            <div className="h-full w-full p-2">
-              <div className="h-full overflow-hidden">
-                <ChatSidebar />
-              </div>
-            </div>
+          <ResizablePanel defaultSize={30} minSize={15} maxSize={40}>
+            <ChatSidebar />
           </ResizablePanel>
         </ResizablePanelGroup>
       </div>

@@ -121,7 +121,7 @@ export function analyzeSheetIntelligently(cellData: any): SheetAnalysis {
   });
 
   const tables: IntelligentTable[] = detectedTables.map((table) => ({
-    id: `table_${table.startRow}_${table.startCol}`,
+    id: table.range, // Use range as ID to match chat route format (sheetIndex will be added later)
     range: table.range,
     position: {
       startRow: table.startRow,

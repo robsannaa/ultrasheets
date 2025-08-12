@@ -408,6 +408,13 @@ class UniversalContextManager {
 
     // Run intelligent analysis
     const intelligence = analyzeSheetIntelligently(cellData);
+    
+    // Fix table IDs to match chat route format: "sheetIndex:range"
+    // Since we're processing the active sheet, use index 0
+    const tablesWithSheetIndex = intelligence.tables.map((table: any) => ({
+      ...table,
+      id: `0:${table.range}` // Prefix with sheet index as expected by chat route
+    }));
 
     return {
       univerAPI,
@@ -415,15 +422,18 @@ class UniversalContextManager {
       fWorksheet,
       activeSheetName: activeSheetSnapshot.name || "Sheet1",
       activeSheetSnapshot,
-      intelligence,
-      tables: intelligence.tables,
-      primaryTable: intelligence.tables[0] || null,
-      calculableColumns: intelligence.tables.flatMap((table: any) =>
+      intelligence: {
+        ...intelligence,
+        tables: tablesWithSheetIndex
+      },
+      tables: tablesWithSheetIndex,
+      primaryTable: tablesWithSheetIndex[0] || null,
+      calculableColumns: tablesWithSheetIndex.flatMap((table: any) =>
         table.columns
           .filter((col: any) => col.isCalculable)
           .map((col: any) => col.name)
       ),
-      numericColumns: intelligence.tables.flatMap((table: any) =>
+      numericColumns: tablesWithSheetIndex.flatMap((table: any) =>
         table.columns
           .filter((col: any) => col.isNumeric)
           .map((col: any) => col.name)
