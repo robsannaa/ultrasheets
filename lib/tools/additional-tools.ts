@@ -424,15 +424,37 @@ export const ConditionalFormattingTool = createSimpleTool(
     console.log(`🎨 Condition: ${condition}, Value: ${value}, Format:`, format);
 
     try {
-      // Get the range object for the conditional formatting
-      const fRange = context.fWorksheet.getRange(range);
-      
+      // Parse range to get coordinates for conditional formatting
+      const rangeMatch = range.match(/([A-Z]+)(\d+):([A-Z]+)(\d+)/);
+      if (!rangeMatch) {
+        throw new Error(`Invalid range format: ${range}`);
+      }
+
+      const [, startCol, startRow, endCol, endRow] = rangeMatch;
+      const startRowIndex = parseInt(startRow) - 1;
+      const endRowIndex = parseInt(endRow) - 1;
+      const startColIndex =
+        startCol
+          .split("")
+          .reduce((acc, char) => acc * 26 + (char.charCodeAt(0) - 64), 0) - 1;
+      const endColIndex =
+        endCol
+          .split("")
+          .reduce((acc, char) => acc * 26 + (char.charCodeAt(0) - 64), 0) - 1;
+
       // Create a new conditional formatting rule using Univer.js CF API
       let rule = context.fWorksheet.newConditionalFormattingRule();
-      
-      // Set the range for the rule
-      rule = rule.setRanges([fRange]);
-      
+
+      // Set the range for the rule using coordinate object
+      rule = rule.setRanges([
+        {
+          startRow: startRowIndex,
+          endRow: endRowIndex,
+          startColumn: startColIndex,
+          endColumn: endColIndex,
+        },
+      ]);
+
       // Apply the condition based on type
       switch (condition) {
         case "greater_than":
@@ -460,7 +482,10 @@ export const ConditionalFormattingTool = createSimpleTool(
           break;
         case "between":
           if (typeof value === "number" && typeof value2 === "number") {
-            rule = rule.whenNumberBetween(Math.min(value, value2), Math.max(value, value2));
+            rule = rule.whenNumberBetween(
+              Math.min(value, value2),
+              Math.max(value, value2)
+            );
           } else {
             throw new Error("between condition requires two numeric values");
           }
@@ -481,7 +506,7 @@ export const ConditionalFormattingTool = createSimpleTool(
         default:
           throw new Error(`Unsupported condition: ${condition}`);
       }
-      
+
       // Apply formatting to the rule
       if (format.backgroundColor) {
         rule = rule.setBackground(format.backgroundColor);
@@ -499,13 +524,13 @@ export const ConditionalFormattingTool = createSimpleTool(
         rule = rule.setItalic(true);
         console.log(`🎨 Applied italic formatting`);
       }
-      
+
       // Build and apply the rule
       const builtRule = rule.build();
       console.log(`🎨 Built conditional formatting rule:`, builtRule);
-      
+
       // Apply the rule to the worksheet
-      const ruleId = context.fWorksheet.setConditionalFormattingRule(builtRule);
+      const ruleId = context.fWorksheet.addConditionalFormattingRule(builtRule);
       console.log(`🎨 Applied conditional formatting rule with ID: ${ruleId}`);
 
       return {
@@ -518,13 +543,12 @@ export const ConditionalFormattingTool = createSimpleTool(
         ruleId,
         message: `Applied conditional formatting rule to ${range} based on '${condition}' condition using Univer.js CF API`,
       };
-
     } catch (error) {
       console.error(`❌ Failed to apply conditional formatting:`, error);
-      
+
       // Fallback to legacy cell-by-cell formatting if CF API fails
       console.log(`🔄 Attempting fallback to direct cell formatting...`);
-      
+
       const rangeMatch = range.match(/([A-Z]+)(\d+):([A-Z]+)(\d+)/);
       if (!rangeMatch) {
         throw new Error(`Invalid range format: ${range}`);
@@ -618,7 +642,10 @@ export const ConditionalFormattingTool = createSimpleTool(
                 value: cellValue,
               });
             } catch (cellError) {
-              console.warn(`⚠️ Failed to format cell ${cellAddress}:`, cellError);
+              console.warn(
+                `⚠️ Failed to format cell ${cellAddress}:`,
+                cellError
+              );
             }
           }
         }
@@ -633,11 +660,174 @@ export const ConditionalFormattingTool = createSimpleTool(
         format,
         formattedCells,
         totalFormatted: formattedCells.length,
-        message: `Applied conditional formatting to ${formattedCells.length} cells in ${range} using fallback method. Original CF API error: ${error.message}`,
+        message: `Applied conditional formatting to ${
+          formattedCells.length
+        } cells in ${range} using fallback method. Original CF API error: ${String(
+          (error as Error)?.message || error
+        )}`,
         fallbackUsed: true,
-        originalError: error.message,
+        originalError: String((error as Error)?.message || error),
       };
     }
+  }
+);
+
+/**
+ * FIND & REPLACE - Modern Implementation
+ */
+export const FindReplaceTool = createSimpleTool(
+  {
+    name: "find_replace",
+    description:
+      "Find and replace text within a sheet range or table. Supports case sensitivity, whole-word, and regex.",
+    category: "data",
+    requiredContext: [],
+    invalidatesCache: false,
+  },
+  async (
+    context: UniversalToolContext,
+    params: {
+      findText: string;
+      replaceText: string;
+      matchCase?: boolean;
+      wholeWord?: boolean;
+      useRegex?: boolean;
+      range?: string; // A1 style like 'A1:D20', 'A:A', etc.
+      tableId?: string; // optional table scope
+      sheetName?: string; // reserved; current active sheet used
+      selectionOnly?: boolean; // reserved for future selection integration
+    }
+  ) => {
+    const {
+      findText,
+      replaceText,
+      matchCase = false,
+      wholeWord = false,
+      useRegex = false,
+      range,
+      tableId,
+    } = params;
+
+    if (!findText || typeof findText !== "string") {
+      throw new Error("findText is required");
+    }
+
+    // Determine target range
+    let targetRange = range;
+    if (!targetRange && tableId) {
+      const table = context.findTable(tableId);
+      if (!table) throw new Error(`Table ${tableId} not found`);
+      targetRange = table.range;
+    }
+
+    // If no explicit range, derive a minimal used range from snapshot
+    if (!targetRange) {
+      const cellData = context.activeSheetSnapshot?.cellData || {};
+      let minRow = Number.MAX_SAFE_INTEGER,
+        maxRow = -1,
+        minCol = Number.MAX_SAFE_INTEGER,
+        maxCol = -1;
+      const toA1Col = (n: number) => {
+        let s = "";
+        n += 1;
+        while (n > 0) {
+          const m = (n - 1) % 26;
+          s = String.fromCharCode(65 + m) + s;
+          n = Math.floor((n - 1) / 26);
+        }
+        return s;
+      };
+      for (const rKey of Object.keys(cellData)) {
+        const r = Number(rKey);
+        const rowData = cellData[r];
+        if (!rowData) continue;
+        minRow = Math.min(minRow, r);
+        maxRow = Math.max(maxRow, r);
+        for (const cKey of Object.keys(rowData)) {
+          const c = Number(cKey);
+          minCol = Math.min(minCol, c);
+          maxCol = Math.max(maxCol, c);
+        }
+      }
+      if (maxRow >= 0 && maxCol >= 0) {
+        const startA1 = `${toA1Col(minCol)}${minRow + 1}`;
+        const endA1 = `${toA1Col(maxCol)}${maxRow + 1}`;
+        targetRange = `${startA1}:${endA1}`;
+      } else {
+        // Nothing to do
+        return {
+          success: true,
+          replacements: 0,
+          cellsUpdated: 0,
+          range: "",
+          message: "No data to scan on the active sheet",
+        };
+      }
+    }
+
+    // Parse A1 range
+    const match = targetRange.match(/([A-Z]+)(\d+):([A-Z]+)(\d+)/);
+    if (!match) throw new Error(`Invalid range: ${targetRange}`);
+    const [, startColStr, startRowStr, endColStr, endRowStr] = match;
+    const colToIndex = (s: string) =>
+      s.split("").reduce((acc, ch) => acc * 26 + (ch.charCodeAt(0) - 64), 0) -
+      1;
+    const startCol = colToIndex(startColStr);
+    const endCol = colToIndex(endColStr);
+    const startRow = parseInt(startRowStr, 10) - 1;
+    const endRow = parseInt(endRowStr, 10) - 1;
+
+    // Build search pattern
+    let pattern: RegExp;
+    if (useRegex) {
+      pattern = new RegExp(findText, matchCase ? "g" : "gi");
+    } else {
+      const escaped = findText.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const body = wholeWord ? `\\b${escaped}\\b` : escaped;
+      pattern = new RegExp(body, matchCase ? "g" : "gi");
+    }
+
+    const worksheet = context.fWorksheet;
+    const updatedCells: Array<{
+      r: number;
+      c: number;
+      from: string;
+      to: string;
+    }> = [];
+    let replacements = 0;
+
+    for (let r = startRow; r <= endRow; r++) {
+      for (let c = startCol; c <= endCol; c++) {
+        const cell = worksheet.getRange(r, c, 1, 1);
+        const v = (cell as any).getValue ? (cell as any).getValue() : undefined;
+        if (v == null) continue;
+        if (typeof v === "string") {
+          const before = v;
+          const after = before.replace(pattern, (m) => {
+            replacements += 1;
+            return replaceText;
+          });
+          if (after !== before) {
+            cell.setValue(after);
+            updatedCells.push({ r, c, from: before, to: after });
+          }
+        }
+      }
+    }
+
+    try {
+      const formula = context.univerAPI.getFormula();
+      formula.executeCalculation();
+    } catch {}
+
+    return {
+      success: true,
+      range: targetRange,
+      replacements,
+      cellsUpdated: updatedCells.length,
+      message: `Replaced ${replacements} occurrence(s) across ${updatedCells.length} cell(s) in ${targetRange}.`,
+      details: updatedCells.slice(0, 20),
+    };
   }
 );
 
@@ -649,6 +839,7 @@ export const ADDITIONAL_TOOLS = [
   FindCellTool,
   FormatAsTableTool,
   ConditionalFormattingTool,
+  FindReplaceTool,
   ...AGGREGATED_CHART_TOOLS, // Add intelligent aggregated chart tools
   ...EXCEL_FUNCTION_TOOLS, // Add comprehensive Excel function support
 ];
