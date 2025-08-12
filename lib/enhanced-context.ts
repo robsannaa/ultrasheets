@@ -539,19 +539,16 @@ export function extractEnhancedWorkbookData(): {
     }
 
     const univerAPI = (window as any).univerAPI;
-    const workbook = univerAPI.getActiveWorkbook();
-    if (!workbook || typeof workbook.save !== "function") return null;
+    const fWorkbook = univerAPI.getActiveWorkbook();
+    if (!fWorkbook) return null;
 
-    const activeSheet = workbook.getActiveSheet();
-    const activeSnapshot = activeSheet?.getSheet()?.getSnapshot();
-    const activeName = activeSnapshot?.name;
+    const fWorksheet = fWorkbook.getActiveSheet();
+    const snap = fWorksheet?.getSheet()?.getSnapshot();
+    const activeName = snap?.name || "Sheet";
 
-    const wbData = workbook.save();
-    const sheetOrder: string[] = wbData.sheetOrder || [];
-    const sheetsData: Record<string, any> = wbData.sheets || {};
-
-    const sheets: EnhancedSheetContext[] = sheetOrder.map((sid) => {
-      const s = sheetsData[sid];
+    // Build a single-sheet context from active sheet snapshot only to avoid workbook.save() circular structures
+    const sheets: EnhancedSheetContext[] = [(() => {
+      const s = snap || ({} as any);
       const name = s?.name || "Sheet";
       // Ensure JSON-safe copy of cellData (strip functions/DI refs)
       const rawCellData = s?.cellData || {};
@@ -561,7 +558,10 @@ export function extractEnhancedWorkbookData(): {
         const safeRow: Record<string, any> = {};
         for (const c of Object.keys(row)) {
           const cell = row[c];
-          if (cell && (typeof cell === "object" || typeof cell === "function")) {
+          if (
+            cell &&
+            (typeof cell === "object" || typeof cell === "function")
+          ) {
             // Keep only primitive fields used by detectors
             const v = (cell as any).v;
             const f = (cell as any).f;
@@ -572,7 +572,7 @@ export function extractEnhancedWorkbookData(): {
         }
         cellData[r] = safeRow;
       }
-      const isActive = name === activeName;
+      const isActive = true;
 
       // Enhanced table detection
       const tables = detectTablesWithSpatialContext(cellData);
@@ -661,7 +661,7 @@ export function extractEnhancedWorkbookData(): {
         },
         intelligentSuggestions,
       };
-    });
+    })()];
 
     // Get recent actions
     const recentActions = (window as any).ultraActionLog || [];
