@@ -1,8 +1,6 @@
 import { FormatCurrencyColumnTool } from "../modern-tools";
-import {
-  FormatAsTableTool,
-  ConditionalFormattingTool,
-} from "../additional-tools";
+import { FormatAsTableTool } from "../additional-tools";
+import { ConditionalFormattingTool } from "../conditional-formatting-tool";
 
 export const FORMAT_TOOLS = [
   FormatCurrencyColumnTool,

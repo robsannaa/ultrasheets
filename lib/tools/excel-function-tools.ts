@@ -9,7 +9,7 @@ import {
   createSimpleTool,
   type UniversalTool,
 } from "../tool-executor";
-import type { UniversalToolContext } from "../universal-context";
+import type { UniversalToolContext } from "../tool-executor";
 
 /**
  * SMART FORMULA BUILDER - Core Excel Formula Tool
@@ -19,7 +19,7 @@ import type { UniversalToolContext } from "../universal-context";
  */
 export const SmartFormulaBuilderTool = createSimpleTool(
   {
-    name: "smart_formula_builder",
+    name: "formula_builder",
     description: "Build Excel formulas intelligently with context-aware range detection",
     category: "analysis",
     requiredContext: ["tables", "columns"],
@@ -439,7 +439,11 @@ function getIntelligentRange(
     // Use specific column
     const column = context.findColumn(targetColumn, table.id);
     if (column) {
-      return context.getColumnRange(column.name, false, table.id); // Exclude header
+      // Simple column range calculation using direct approach
+      const colLetter = String.fromCharCode(65 + column.index);
+      const startRow = table.position.startRow + 2; // Skip header
+      const endRow = table.position.endRow + 1;
+      return `${colLetter}${startRow}:${colLetter}${endRow}`;
     }
   }
 
@@ -454,7 +458,11 @@ function getIntelligentRange(
   }
 
   if (bestColumn) {
-    return context.getColumnRange(bestColumn.name, false, table.id);
+    // Simple column range calculation using direct approach
+    const colLetter = String.fromCharCode(65 + bestColumn.index);
+    const startRow = table.position.startRow + 2; // Skip header
+    const endRow = table.position.endRow + 1;
+    return `${colLetter}${startRow}:${colLetter}${endRow}`;
   }
 
   // Ultimate fallback: use table data range (excluding header)

@@ -10,14 +10,15 @@ import {
   createSimpleTool,
   type ToolDefinition,
 } from "../tool-executor";
-import type { UniversalToolContext } from "../universal-context";
+import type { UniversalToolContext } from "../tool-executor";
+import { getWorkbookData } from "../univer-data-source";
 
 /**
  * ADD SMART TOTALS - Modern Implementation
  */
 export const AddSmartTotalsTool = createSimpleTool(
   {
-    name: "add_smart_totals",
+    name: "add_totals",
     description:
       "Automatically add totals to all calculable columns in a table",
     category: "data",
@@ -28,19 +29,8 @@ export const AddSmartTotalsTool = createSimpleTool(
     context: UniversalToolContext,
     params: { columns?: string[]; tableId?: string }
   ) => {
-    // Resolve table robustly: accept explicit id, A1 range, or fallback to primary/first table
+    // Resolve table robustly using the context's findTable method
     let table = context.findTable(params.tableId);
-    if (!table && params.tableId) {
-      const id = params.tableId;
-      // If id is like "0:0", map to first table
-      if (/^\d+:0$/.test(id) && context.tables.length > 0) {
-        table = context.tables[0];
-      } else if (/^\d+:[A-Z]+\d+:[A-Z]+\d+$/i.test(id)) {
-        // If id looks like "0:A1:D6", try to match by range suffix
-        const suffix = id.split(":").slice(1).join(":");
-        table = context.tables.find((t) => t.range === suffix) || (null as any);
-      }
-    }
     if (!table) {
       throw new Error(`Table ${params.tableId || "primary"} not found`);
     }
@@ -66,7 +56,12 @@ export const AddSmartTotalsTool = createSimpleTool(
 
     // Add totals for each column
     for (const column of columnsToTotal) {
-      const sumFormula = context.buildSumFormula(column.name, params.tableId);
+      // Build SUM formula directly using column range
+      const colLetter = String.fromCharCode(65 + column.index);
+      const startRow = table.position.startRow + 2; // Skip header
+      const endRow = table.position.endRow + 1;
+      const dataRange = `${colLetter}${startRow}:${colLetter}${endRow}`;
+      const sumFormula = `=SUM(${dataRange})`;
       const sumCellA1 = `${column.letter}${sumRow + 1}`;
 
       // Set the formula
@@ -131,59 +126,10 @@ export const AddFilterTool = createSimpleTool(
     console.log(
       `🔍 AddFilterTool: Looking for table with ID: "${params.tableId}"`
     );
-    console.log(
-      `🔍 Available tables:`,
-      context.tables.map((t) => ({ id: t.id, range: t.range }))
-    );
-    console.log(
-      `🔍 Primary table:`,
-      context.primaryTable?.id,
-      context.primaryTable?.range
-    );
 
     const table = context.findTable(params.tableId);
     if (!table) {
-      console.log(
-        `❌ AddFilterTool: Table not found. Available table IDs: ${context.tables
-          .map((t) => t.id)
-          .join(", ")}`
-      );
-
-      // If no specific table ID and no primary table, try to use the first available table
-      if (!params.tableId && context.tables.length > 0) {
-        console.log(
-          `🔄 AddFilterTool: No primary table found, using first available table: ${context.tables[0].id}`
-        );
-        const fallbackTable = context.tables[0];
-
-        const fallbackTableRange = fallbackTable.range;
-        const fallbackFRange = context.fWorksheet.getRange(fallbackTableRange);
-
-        // Remove existing filter if any
-        let fallbackFFilter = fallbackFRange.getFilter();
-        if (fallbackFFilter) {
-          fallbackFFilter.remove();
-        }
-
-        // Create new filter
-        fallbackFFilter = fallbackFRange.createFilter();
-
-        return {
-          success: true,
-          tableId: fallbackTable.id,
-          range: fallbackTableRange,
-          message: `Added filter to table ${fallbackTable.id} at range ${fallbackTableRange} (fallback)`,
-          filterApplied: true,
-        };
-      }
-
-      throw new Error(
-        `Table ${
-          params.tableId || "primary"
-        } not found. Available tables: ${context.tables
-          .map((t) => t.id)
-          .join(", ")}`
-      );
+      throw new Error(`Table ${params.tableId || "primary"} not found`);
     }
 
     const tableRange = table.range;
@@ -250,7 +196,7 @@ export const FormatCurrencyColumnTool = createSimpleTool(
           ? [...w.ultraActionLog].reverse()
           : [];
         const lastAdded = recent.find(
-          (a: any) => a?.tool === "smart_add_column" && a?.params?.columnName
+          (a: any) => a?.tool === "add_column" && a?.params?.columnName
         );
         if (lastAdded?.params?.columnName) {
           const candidate = context.findColumn(
@@ -370,8 +316,11 @@ export const FormatCurrencyColumnTool = createSimpleTool(
       );
     }
 
-    // Get data range (excluding header)
-    const dataRange = context.getColumnRange(targetColumn.name, false, tableId);
+    // Get data range (excluding header) - build directly
+    const colLetter = String.fromCharCode(65 + targetColumn.index);
+    const startRow = table.position.startRow + 2; // Skip header
+    const endRow = table.position.endRow + 1;
+    const dataRange = `${colLetter}${startRow}:${colLetter}${endRow}`;
 
     // Currency format patterns
     const currencyFormats: { [key: string]: string } = {
@@ -407,12 +356,12 @@ export const FormatCurrencyColumnTool = createSimpleTool(
 );
 
 /**
- * GENERATE CHART - Modern Implementation
+ * GENERATE CHART - Enhanced Implementation with proper Univer builder pattern
  */
 export const GenerateChartTool = createSimpleTool(
   {
     name: "generate_chart",
-    description: "Generate charts using intelligent table detection",
+    description: "Generate charts using proper Univer builder pattern with intelligent data detection",
     category: "analysis",
     requiredContext: ["tables"],
     invalidatesCache: false,
@@ -423,7 +372,7 @@ export const GenerateChartTool = createSimpleTool(
       chart_type?: string;
       title?: string;
       x_column?: string;
-      y_columns?: string[];
+      y_columns?: string[] | string;
       data_range?: string;
       position?: string;
       width?: number;
@@ -437,71 +386,215 @@ export const GenerateChartTool = createSimpleTool(
       width = 400,
       height = 300,
       tableId,
+      x_column,
+      y_columns
     } = params;
 
-    // Determine data range
-    let finalDataRange;
-    if (params.data_range) {
-      finalDataRange = params.data_range;
-    } else {
-      const table = context.findTable(tableId);
-      if (!table) {
-        throw new Error(
-          `Table ${tableId || "primary"} not found for chart data`
-        );
+    console.log(`📊 GenerateChartTool: Creating ${chart_type} chart "${title}"`);
+
+    try {
+      // Determine data range with intelligent filtering
+      let finalDataRange: string;
+      let sourceTable: any = null;
+
+      if (params.data_range) {
+        finalDataRange = params.data_range;
+        console.log(`📊 Using explicit data range: ${finalDataRange}`);
+      } else {
+        sourceTable = context.findTable(tableId);
+        if (!sourceTable) {
+          throw new Error(`Table ${tableId || "primary"} not found for chart data`);
+        }
+        
+        // If specific columns are requested, create a filtered range
+        if (x_column || y_columns) {
+          finalDataRange = await createFilteredDataRange(context, sourceTable, x_column, y_columns);
+          console.log(`📊 Created filtered data range: ${finalDataRange}`);
+        } else {
+          finalDataRange = sourceTable.range;
+          console.log(`📊 Using full table range: ${finalDataRange}`);
+        }
       }
-      finalDataRange = table.range;
+
+      // Determine optimal chart position
+      const position = params.position
+        ? params.position
+        : context.findOptimalPlacement(Math.ceil(width / 64), Math.ceil(height / 20)).range;
+
+      console.log(`📊 Chart position: ${position}`);
+
+      // Get proper Univer chart type enum
+      const univerChartType = getUniverChartType(context.univerAPI, chart_type);
+      console.log(`📊 Chart type enum:`, univerChartType);
+
+      // Parse position coordinates
+      const { anchorRow, anchorCol } = parseChartPosition(position);
+
+      // Create chart using proper builder pattern
+      const chartBuilder = context.fWorksheet.newChart();
+      
+      if (!chartBuilder) {
+        throw new Error("Failed to create chart builder - newChart() returned null");
+      }
+
+      // Configure chart with method chaining
+      let configuredBuilder = chartBuilder
+        .setChartType(univerChartType)
+        .addRange(finalDataRange)
+        .setPosition(anchorRow, anchorCol, 0, 0)
+        .setWidth(width)
+        .setHeight(height);
+
+      // Set chart options if title provided
+      if (title) {
+        // Try different methods to set title based on Univer version
+        try {
+          configuredBuilder = configuredBuilder.setOptions({ title: { text: title } });
+        } catch (e1) {
+          try {
+            configuredBuilder = configuredBuilder.setOptions("title.text", title);
+          } catch (e2) {
+            try {
+              configuredBuilder = configuredBuilder.setTitle(title);
+            } catch (e3) {
+              console.warn('⚠️ Could not set chart title, continuing without it');
+            }
+          }
+        }
+      }
+
+      // Build the chart configuration
+      const chartInfo = configuredBuilder.build();
+      
+      if (!chartInfo) {
+        throw new Error("Chart builder returned null - build() failed");
+      }
+
+      console.log(`📊 Built chart config:`, chartInfo);
+
+      // Insert chart into worksheet
+      const insertResult = await context.fWorksheet.insertChart(chartInfo);
+      
+      if (insertResult === false) {
+        throw new Error("Failed to insert chart into worksheet");
+      }
+
+      console.log(`✅ GenerateChartTool: Successfully created ${chart_type} chart`);
+
+      return {
+        chartType: chart_type,
+        univerChartType: univerChartType,
+        dataRange: finalDataRange,
+        position,
+        anchorRow,
+        anchorCol,
+        title,
+        width,
+        height,
+        x_column,
+        y_columns,
+        tableId: sourceTable?.id,
+        message: `Created ${chart_type} chart "${title}" using data range ${finalDataRange} at ${position}`,
+        success: true
+      };
+
+    } catch (error) {
+      console.error(`❌ GenerateChartTool failed:`, error);
+      throw error;
     }
-
-    // Determine chart position without speculative spatial analysis
-    const position = params.position
-      ? params.position
-      : context.findOptimalPlacement(width / 60, height / 20).range;
-
-    // Chart type mapping
-    const univerChartTypeMap: { [key: string]: string } = {
-      column: "Column",
-      line: "Line",
-      pie: "Pie",
-      bar: "Bar",
-      scatter: "Scatter",
-    };
-
-    const univerChartType = univerChartTypeMap[chart_type] || "Column";
-    const enumType = (context.univerAPI as any).Enum?.ChartType || {};
-    const chartTypeEnum = enumType[univerChartType] || enumType.Column;
-
-    // Parse position
-    const posCol = (position.match(/[A-Z]+/i)?.[0] || "H").toUpperCase();
-    const posRowNum = parseInt(position.replace(/\D+/g, ""), 10) || 2;
-    const anchorRow = posRowNum - 1;
-    const anchorCol = posCol.charCodeAt(0) - 65;
-
-    // Create chart
-    const builder = context.fWorksheet
-      .newChart()
-      .setChartType(chartTypeEnum)
-      .addRange(finalDataRange)
-      .setPosition(anchorRow, anchorCol, 0, 0)
-      .setWidth(width)
-      .setHeight(height);
-
-    if (title) builder.setOptions("title.text", title);
-
-    const chartInfo = builder.build();
-    await context.fWorksheet.insertChart(chartInfo);
-
-    return {
-      chartType: univerChartType,
-      dataRange: finalDataRange,
-      position,
-      title,
-      width,
-      height,
-      message: `Created ${chart_type} chart "${title}" using data range ${finalDataRange} at ${position}`,
-    };
   }
 );
+
+/**
+ * Get proper Univer chart type enum
+ */
+function getUniverChartType(univerAPI: any, chartType: string): any {
+  const ChartType = univerAPI?.Enum?.ChartType;
+  
+  if (!ChartType) {
+    console.warn('⚠️ ChartType enum not available, using fallback');
+    return chartType; // Fallback to string
+  }
+
+  const typeMapping: { [key: string]: any } = {
+    column: ChartType.Column || ChartType.COLUMN,
+    line: ChartType.Line || ChartType.LINE,
+    pie: ChartType.Pie || ChartType.PIE,
+    bar: ChartType.Bar || ChartType.BAR,
+    scatter: ChartType.Scatter || ChartType.SCATTER,
+  };
+
+  const mappedType = typeMapping[chartType.toLowerCase()];
+  
+  if (!mappedType) {
+    console.warn(`⚠️ Unknown chart type: ${chartType}, using Column`);
+    return ChartType.Column || ChartType.COLUMN || 'Column';
+  }
+
+  return mappedType;
+}
+
+/**
+ * Parse chart position string to row/column coordinates
+ */
+function parseChartPosition(position: string): { anchorRow: number; anchorCol: number } {
+  const colMatch = position.match(/[A-Z]+/i);
+  const rowMatch = position.match(/\d+/);
+  
+  const posCol = (colMatch?.[0] || "H").toUpperCase();
+  const posRowNum = parseInt(rowMatch?.[0] || "2", 10);
+  
+  // Convert to 0-based indices
+  const anchorRow = Math.max(0, posRowNum - 1);
+  const anchorCol = Math.max(0, posCol.charCodeAt(0) - 65);
+  
+  return { anchorRow, anchorCol };
+}
+
+/**
+ * Create filtered data range based on specified columns
+ */
+async function createFilteredDataRange(
+  _context: UniversalToolContext,
+  table: any,
+  x_column?: string,
+  y_columns?: string[] | string
+): Promise<string> {
+  // For now, return the full table range
+  // In a more advanced implementation, this would create a new range with only specified columns
+  let targetColumns: string[] = [];
+  
+  if (x_column) {
+    targetColumns.push(x_column);
+  }
+  
+  if (y_columns) {
+    const yColArray = Array.isArray(y_columns) ? y_columns : [y_columns];
+    targetColumns.push(...yColArray);
+  }
+  
+  if (targetColumns.length === 0) {
+    return table.range;
+  }
+  
+  // Find the columns in the table
+  const matchedColumns = targetColumns
+    .map(colName => table.columns.find((c: any) => 
+      c.name.toLowerCase().includes(colName.toLowerCase()) || 
+      c.letter === colName.toUpperCase()
+    ))
+    .filter(Boolean);
+  
+  if (matchedColumns.length === 0) {
+    console.warn('⚠️ No matching columns found, using full table range');
+    return table.range;
+  }
+  
+  // For advanced filtering, we would construct a range with only these columns
+  // For now, return the full table range
+  console.log(`📊 Matched columns for chart: ${matchedColumns.map(c => c.name).join(', ')}`);
+  return table.range;
+}
 
 /**
  * GET WORKBOOK SNAPSHOT - Modern Implementation
@@ -514,25 +607,19 @@ export const GetWorkbookSnapshotTool = createSimpleTool(
     requiredContext: [], // This tool builds the context
     invalidatesCache: false,
   },
-  async (context: UniversalToolContext, params: {}) => {
-    // Force a fresh context to ensure latest data
-    const freshContext = await context.refresh();
-    console.log("🔍 GetWorkbookSnapshotTool: Fresh context:", freshContext);
+  async (context: UniversalToolContext, _params: {}) => {
+    // Get fresh data directly from Univer API
+    const workbookData = getWorkbookData();
+    console.log("🔍 GetWorkbookSnapshotTool: Fresh workbook data:", workbookData);
 
     return {
-      activeSheet: freshContext.activeSheetName,
-      snapshot: freshContext.activeSheetSnapshot,
-      intelligence: freshContext.intelligence,
+      activeSheet: workbookData?.activeSheetName || 'unknown',
+      workbookData,
       summary: {
-        totalTables: freshContext.tables.length,
-        totalColumns: freshContext.tables.reduce(
-          (sum, table) => sum + table.columns.length,
-          0
-        ),
-        calculableColumns: freshContext.calculableColumns,
-        numericColumns: freshContext.numericColumns,
+        totalSheets: workbookData?.sheets?.length || 0,
+        activeSheet: workbookData?.activeSheetName || 'unknown'
       },
-      message: `Retrieved complete workbook context for ${freshContext.activeSheetName}`,
+      message: `Retrieved workbook data for ${workbookData?.activeSheetName || 'unknown sheet'}`,
     };
   }
 );
@@ -575,11 +662,7 @@ export const SortTool = createSimpleTool(
       // Find table and use its range
       table = context.findTable(tableId);
       if (!table) {
-        console.log(
-          `❌ SortTool: Table not found. Available table IDs: ${context.tables
-            .map((t) => t.id)
-            .join(", ")}`
-        );
+        console.log(`❌ SortTool: Table not found`);
         throw new Error(`Table ${tableId || "primary"} not found`);
       }
       targetRange = table.range;

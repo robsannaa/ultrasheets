@@ -14,3 +14,5 @@ https://docs.univer.ai/guides/sheets/features/core/general-api
 https://docs.univer.ai/guides/sheets/features/core/numfmt
 https://docs.univer.ai/guides/sheets/features/core/range-theme
 https://docs.univer.ai/guides/sheets/features/find-replace
+
+- Always answer with short answers. Let the code you write judge you.

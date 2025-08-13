@@ -18,52 +18,44 @@ import { CollapsibleMarkdown } from "./chat/collapsible-markdown";
 
 // ChatInput now imported from ./chat/chat-input
 
-import { getChatContext, getAISummary } from "../lib/unified-context-system";
-import type { ChatContext } from "../lib/unified-context-system";
+import { getWorkbookData } from "../lib/univer-data-source";
 
-// Rich workbook context using unified system with AI optimizations
-async function extractWorkbookDataUnified() {
+// Production-grade workbook context using ONLY Univer API
+async function extractWorkbookDataPrecise() {
   try {
-    // Use AI-optimized context extraction
-    const chatContext = await getChatContext(undefined, {
-      format: "summary",
-      maxTokens: 1500
-    });
-    
-    const aiSummary = await getAISummary();
+    const workbookData = getWorkbookData();
+    if (!workbookData) {
+      return {
+        contextText: "No workbook data available",
+        metadata: { tablesCount: 0, hasSelection: false, estimatedTokens: 0, contextType: "none" },
+        workbookData: null
+      };
+    }
+
+    // Calculate metadata from actual data
+    const totalCells = workbookData.sheets.reduce((sum, sheet) => sum + sheet.cells.length, 0);
+    const hasData = totalCells > 0;
     
     return {
-      contextText: chatContext.contextText,
-      metadata: chatContext.metadata,
-      tables: aiSummary.tables,
-      selection: aiSummary.selection,
-      recommendations: aiSummary.recommendations
+      contextText: `Workbook: ${workbookData.workbookId}, Active: ${workbookData.activeSheetName}, Sheets: ${workbookData.sheets.length}`,
+      metadata: { 
+        tablesCount: workbookData.sheets.length, 
+        hasSelection: false, 
+        estimatedTokens: Math.min(totalCells * 2, 1000),
+        contextType: hasData ? "data" : "empty"
+      },
+      workbookData
     };
   } catch (error) {
-    console.warn("Unified context extraction failed, using fallback:", error);
+    console.error("Precise context extraction failed:", error);
     return {
-      contextText: "Spreadsheet context unavailable",
-      metadata: { tablesCount: 0, hasSelection: false, estimatedTokens: 0, contextType: "unknown" },
-      tables: [],
-      selection: { hasSelection: false },
-      recommendations: []
+      contextText: "Context extraction error",
+      metadata: { tablesCount: 0, hasSelection: false, estimatedTokens: 0, contextType: "error" },
+      workbookData: null
     };
   }
 }
 
-// Legacy fallback function (kept for compatibility during transition)
-function extractWorkbookData() {
-  // This will be removed after full migration
-  try {
-    const w: any = window as any;
-    return {
-      sheets: [],
-      cleanContext: w.__latestCleanContext || null,
-    };
-  } catch {
-    return { sheets: [] };
-  }
-}
 
 export function ChatSidebar({ onMobileClose }: { onMobileClose?: () => void }) {
   const sidebarRef = useRef<HTMLDivElement>(null);
@@ -73,7 +65,7 @@ export function ChatSidebar({ onMobileClose }: { onMobileClose?: () => void }) {
 
   // Auto-close mobile sidebar after successful actions
 
-  // Enhanced context caching with unified system
+  // Clean context using only Univer API
   const [unifiedContext, setUnifiedContext] = React.useState<any>(null);
   const [contextMetadata, setContextMetadata] = React.useState<any>(null);
   
@@ -83,12 +75,10 @@ export function ChatSidebar({ onMobileClose }: { onMobileClose?: () => void }) {
         const w: any = window as any;
         if (!w.univerAPI) return;
         
-        const contextData = await extractWorkbookDataUnified();
+        const contextData = await extractWorkbookDataPrecise();
         setUnifiedContext(contextData);
         setContextMetadata(contextData.metadata);
         
-        // Legacy compatibility
-        w.__latestUnifiedContext = contextData;
       } catch (error) {
         console.warn("Failed to load unified context:", error);
       }
@@ -139,8 +129,14 @@ export function ChatSidebar({ onMobileClose }: { onMobileClose?: () => void }) {
       workbookData: mounted
         ? (() => {
             try {
-              // Use cached unified context or fallback
-              const contextData = unifiedContext || extractWorkbookData();
+              // Use cached unified context
+              const contextData = unifiedContext || {
+                contextText: "Context extraction failed",
+                metadata: { tablesCount: 0, hasSelection: false, estimatedTokens: 0, contextType: "unknown" },
+                tables: [],
+                selection: { hasSelection: false },
+                recommendations: []
+              };
               return {
                 ...contextData,
                 // Include context metadata for AI optimization
@@ -590,20 +586,24 @@ export function ChatSidebar({ onMobileClose }: { onMobileClose?: () => void }) {
                 if (w.ultraActionLog.length > 50) w.ultraActionLog.shift();
               } catch {}
             } else if (action.type === "getCleanSheetContext") {
-              // Get unified context with AI optimizations
-              const { getChatContext } = await import(
-                "../lib/unified-context-system"
-              );
+              // Get workbook context using direct Univer API
               const univerAPI = (window as any).univerAPI;
               if (!univerAPI) throw new Error("Univer API not available");
 
-              const contextData = await getChatContext(undefined, {
-                format: "detailed",
-                maxTokens: 3000
-              });
+              const workbookData = getWorkbookData();
+              const contextData = {
+                contextText: workbookData ? `Workbook: ${workbookData.activeSheetName}` : "No data",
+                metadata: { 
+                  tablesCount: workbookData?.sheets.length || 0, 
+                  hasSelection: false, 
+                  estimatedTokens: 100,
+                  contextType: "direct_api"
+                },
+                workbookData
+              };
 
               // Return the context to the LLM
-              console.log("🧠 Unified context:", contextData);
+              console.log("🧠 Direct API context:", contextData);
               
               // Update cached context
               setUnifiedContext(contextData);

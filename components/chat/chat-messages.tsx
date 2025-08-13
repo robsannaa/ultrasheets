@@ -7,15 +7,106 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { cn } from "@/lib/utils";
 import { ToolBadge } from "@/components/ToolBadge";
 import { CollapsibleMarkdown } from "./collapsible-markdown";
+import { Clock, CheckCircle, XCircle, AlertTriangle } from "lucide-react";
+
+const consultingVerbs = [
+  "Analyzing",
+  "Arbitraging",
+  "Auditing",
+  "Benchmarking",
+  "Budgeting",
+  "Capitalizing",
+  "Closing",
+  "Consolidating",
+  "Deleveraging",
+  "De-risking",
+  "Diversifying",
+  "Drafting",
+  "Engaging",
+  "Evaluating",
+  "Executing",
+  "Expanding",
+  "Facilitating",
+  "Forecasting",
+  "Hedging",
+  "Implementing",
+  "Integrating",
+  "Investing",
+  "Leveraging",
+  "Mapping",
+  "Maximizing",
+  "Measuring",
+  "Mediating",
+  "Mitigating",
+  "Modeling",
+  "Negotiating",
+  "Optimizing",
+  "Outsourcing",
+  "Planning",
+  "Positioning",
+  "Prioritizing",
+  "Procuring",
+  "Processing",
+  "Rebalancing",
+  "Rebranding",
+  "Refinancing",
+  "Refining",
+  "Researching",
+  "Restructuring",
+  "Scaling",
+  "Securing",
+  "Simplifying",
+  "Standardizing",
+  "Streamlining",
+  "Strengthening",
+  "Structuring",
+  "Synthesizing",
+  "Targeting",
+  "Testing",
+  "Tracking",
+  "Trading",
+  "Transforming",
+  "Validating",
+  "Valuating",
+  "Visualizing",
+];
 
 export function ChatMessages({
   messages,
   isLoading,
+  aiPerformanceMode = false,
 }: {
   messages: any[];
   isLoading: boolean;
+  aiPerformanceMode?: boolean;
 }) {
   const scrollAreaRef = useRef<HTMLDivElement>(null);
+
+  // Loading verb + animated dots state
+  const [loadingVerb, setLoadingVerb] = React.useState<string>(
+    consultingVerbs[Math.floor(Math.random() * consultingVerbs.length)]
+  );
+  const [dotCount, setDotCount] = React.useState<number>(1);
+
+  // Rotate word every 3s and dots every 500ms while loading
+  useEffect(() => {
+    if (!isLoading) return;
+
+    const verbTimer = setInterval(() => {
+      const next =
+        consultingVerbs[Math.floor(Math.random() * consultingVerbs.length)];
+      setLoadingVerb(next);
+    }, 3000);
+
+    const dotsTimer = setInterval(() => {
+      setDotCount((c) => (c % 3) + 1);
+    }, 500);
+
+    return () => {
+      clearInterval(verbTimer);
+      clearInterval(dotsTimer);
+    };
+  }, [isLoading]);
 
   useEffect(() => {
     if (scrollAreaRef.current) {
@@ -33,12 +124,19 @@ export function ChatMessages({
   const mergedMessages = messages;
 
   return (
-    <ScrollArea
-      className="h-full px-1 sm:px-2 py-2 sm:py-4"
-      ref={scrollAreaRef}
-    >
+    <ScrollArea className="h-full p-4" ref={scrollAreaRef}>
       <div className="space-y-3">
-        {mergedMessages.map((message) => {
+        {/* AI Performance indicator at top */}
+        {aiPerformanceMode && messages.length > 1 && (
+          <div className="text-xs text-center text-muted-foreground py-2 border-b">
+            <div className="flex items-center justify-center gap-2">
+              <div className="h-2 w-2 bg-green-500 rounded-full animate-pulse" />
+              AI Performance Mode Active
+            </div>
+          </div>
+        )}
+
+        {mergedMessages.map((message, idx) => {
           const hasParts = Array.isArray(message.parts);
           const hasTextPart = hasParts
             ? message.parts.some(
@@ -56,29 +154,26 @@ export function ChatMessages({
               message.content.trim().length > 0) ||
             hasTextPart ||
             hasToolPart;
-          if (message.role === "assistant" && !hasContent) return null;
+          const isLast = idx === mergedMessages.length - 1;
+          if (
+            message.role === "assistant" &&
+            !hasContent &&
+            !(isLoading && isLast)
+          )
+            return null;
 
           return (
             <div
               key={message.id}
               className={cn(
-                "flex items-start gap-2",
-                message.role === "user" && "flex-row-reverse"
+                message.role === "assistant"
+                  ? "rounded-xl p-3 transition-all duration-300 bg-muted/50"
+                  : message.role === "user"
+                  ? "rounded-xl p-3 transition-all duration-300 bg-primary/5 ml-6"
+                  : "rounded-full px-3 py-1.5 transition-all duration-300 text-center bg-orange-50/80 dark:bg-orange-950/30 border border-orange-200/60 dark:border-orange-800/40 mr-auto max-w-fit"
               )}
             >
-              <Avatar className="w-7 h-7">
-                <AvatarFallback>
-                  {message.role === "user" ? "U" : "A"}
-                </AvatarFallback>
-              </Avatar>
-              <div
-                className={cn(
-                  "max-w-full sm:max-w-[85%] md:max-w-[75%] rounded-lg p-2 sm:p-3 text-sm break-words whitespace-pre-wrap",
-                  message.role === "user"
-                    ? "bg-primary text-primary-foreground"
-                    : "bg-muted"
-                )}
-              >
+              <div className="text-sm leading-relaxed text-foreground">
                 {message.parts ? (
                   <>
                     {message.parts.map((part: any) => {
@@ -110,8 +205,56 @@ export function ChatMessages({
                                 toolName={toolName}
                                 state="result"
                               />
-                              <div className="mt-1 text-xs text-muted-foreground break-words">
-                                Action type: {result?.clientSideAction?.type}
+                              <div className="mt-1 text-xs text-muted-foreground break-words space-y-1">
+                                <div className="flex items-center gap-2">
+                                  <span>
+                                    Action:{" "}
+                                    {result?.clientSideAction?.type || "N/A"}
+                                  </span>
+                                  {result?.success !== false ? (
+                                    <CheckCircle className="h-3 w-3 text-green-500" />
+                                  ) : (
+                                    <XCircle className="h-3 w-3 text-red-500" />
+                                  )}
+                                </div>
+
+                                {/* Enhanced result information */}
+                                {aiPerformanceMode && result?._metadata && (
+                                  <div className="text-xs text-muted-foreground">
+                                    <div className="flex items-center gap-1">
+                                      <Clock className="h-3 w-3" />
+                                      <span>
+                                        {result._metadata.executionTime}ms
+                                      </span>
+                                      {result._metadata.attempts > 1 && (
+                                        <span className="text-amber-500">
+                                          ({result._metadata.attempts} attempts)
+                                        </span>
+                                      )}
+                                      {result._metadata.cacheHit && (
+                                        <span className="text-green-500">
+                                          (cached)
+                                        </span>
+                                      )}
+                                    </div>
+                                    {result._metadata.tablesAnalyzed > 0 && (
+                                      <div className="text-xs">
+                                        Tables analyzed:{" "}
+                                        {result._metadata.tablesAnalyzed}
+                                      </div>
+                                    )}
+                                  </div>
+                                )}
+
+                                {/* Show any error information */}
+                                {result?.error && (
+                                  <div className="flex items-center gap-1 text-red-500">
+                                    <AlertTriangle className="h-3 w-3" />
+                                    <span className="text-xs">
+                                      {result.error}
+                                    </span>
+                                  </div>
+                                )}
                               </div>
                             </div>
                           );
@@ -129,19 +272,55 @@ export function ChatMessages({
                           )
                           .map((p: any) => p.text)
                           .join("");
-                        return text ? (
-                          <CollapsibleMarkdown
-                            key="assistant-text"
-                            text={text}
-                          />
-                        ) : null;
+                        if (text && text.trim().length > 0) {
+                          return (
+                            <CollapsibleMarkdown
+                              key="assistant-text"
+                              text={text}
+                            />
+                          );
+                        }
+                        if (
+                          message.role === "assistant" &&
+                          isLast &&
+                          isLoading
+                        ) {
+                          return (
+                            <div
+                              key="assistant-loading"
+                              className="text-sm leading-relaxed text-foreground"
+                              role="status"
+                              aria-live="polite"
+                            >
+                              {loadingVerb} {".".repeat(dotCount)}
+                            </div>
+                          );
+                        }
+                        return null;
                       } catch {
                         return null;
                       }
                     })()}
                   </>
                 ) : message.role === "assistant" ? (
-                  <CollapsibleMarkdown text={String(message.content || "")} />
+                  (() => {
+                    const content = String(message.content || "");
+                    if (content && content.trim().length > 0) {
+                      return <CollapsibleMarkdown text={content} />;
+                    }
+                    if (isLast && isLoading) {
+                      return (
+                        <div
+                          className="text-sm leading-relaxed text-foreground"
+                          role="status"
+                          aria-live="polite"
+                        >
+                          {loadingVerb} {".".repeat(dotCount)}
+                        </div>
+                      );
+                    }
+                    return null;
+                  })()
                 ) : (
                   message.content
                 )}
@@ -160,11 +339,11 @@ function describeTool(toolName: string, args: any): string {
       return "List columns";
     case "calculate_total":
       return `Total for ${args?.column ?? "column"}`;
-    case "add_smart_totals":
-      return `Smart totals${
+    case "add_totals":
+      return `Add totals${
         args?.columns
           ? ` for ${args.columns.join(", ")}`
-          : " for all calculable columns"
+          : " for specified columns"
       }`;
     case "format_recent_totals":
       return `Format recent totals as ${args?.currency || "USD"}`;

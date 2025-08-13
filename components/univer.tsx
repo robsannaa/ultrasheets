@@ -288,6 +288,19 @@ export function Univer() {
         console.error("❌ Failed to attach modern tool dispatcher:", e);
         throw e;
       }
+
+      // // Run implementation tests in development
+      // if (process.env.NODE_ENV === 'development') {
+      //   try {
+      //     const { testImplementationImprovements } = await import("../lib/test-improvements");
+      //     // Run test after everything is initialized
+      //     setTimeout(() => {
+      //       testImplementationImprovements().catch(console.error);
+      //     }, 3000);
+      //   } catch (testError) {
+      //     console.warn("⚠️ Could not load test improvements:", testError);
+      //   }
+      // }
     };
 
     initializeUniver().catch(console.error);

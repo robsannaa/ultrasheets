@@ -4,7 +4,7 @@ import * as React from "react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Send, Loader2, Bot, MessageSquare, Settings, Database, CheckCircle, AlertCircle } from "lucide-react";
-import { getCacheStats, debugAIPerformance } from "@/lib/unified-context-system";
+import { getWorkbookData } from "@/lib/univer-data-source";
 
 export function ChatInput({
   input,
@@ -36,7 +36,13 @@ export function ChatInput({
   React.useEffect(() => {
     const updateStats = async () => {
       try {
-        const stats = await getCacheStats();
+        // No cache needed with direct Univer API access
+        const workbookData = getWorkbookData();
+        const stats = {
+          strategy: 'direct_api',
+          hitRate: 100, // Always fresh data
+          cacheAge: 0 // No cache
+        };
         setCacheStats(stats);
       } catch {
         // Ignore errors in stats collection
@@ -51,9 +57,12 @@ export function ChatInput({
   // Debug performance on demand
   const handleDebugPerformance = async () => {
     try {
-      await debugAIPerformance();
+      console.log('🔍 Debugging workbook state via Univer API');
+      const workbookData = getWorkbookData();
+      console.log('Workbook Data:', workbookData);
+      console.log('Direct API access - no cache, always fresh data');
     } catch (error) {
-      console.error('Failed to debug AI performance:', error);
+      console.error('Failed to debug workbook state:', error);
     }
   };
 

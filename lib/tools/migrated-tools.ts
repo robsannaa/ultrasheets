@@ -6,7 +6,8 @@
  */
 
 import { createSimpleTool } from "../tool-executor";
-import type { UniversalToolContext } from "../universal-context";
+import type { UniversalToolContext } from "../tool-executor";
+import { getWorkbookData } from "../univer-data-source";
 
 /**
  * CALCULATE TOTAL - Modern Implementation
@@ -54,11 +55,16 @@ export const CalculateTotalTool = createSimpleTool(
     };
 
     const formulaFunction = formulaMap[aggregation];
-    const dataRange = context.getColumnRange(targetColumn.name, false, tableId);
+    // Simple column range calculation using direct approach
+    const targetTable = context.findTable(tableId);
+    const colLetter = String.fromCharCode(65 + targetColumn.index);
+    const startRow = targetTable.position.startRow + 2; // Skip header
+    const endRow = targetTable.position.endRow + 1;
+    const dataRange = `${colLetter}${startRow}:${colLetter}${endRow}`;
     const formula = `=${formulaFunction}(${dataRange})`;
 
     // Place the result below the table
-    const sumRow = table.position.endRow + 1;
+    const sumRow = targetTable.position.endRow + 1;
     const sumCell = `${targetColumn.letter}${sumRow + 1}`;
 
     // Set the formula
@@ -224,7 +230,7 @@ export const CreatePivotTableTool = createSimpleTool(
     description:
       "Create a pivot table from table data with intelligent analysis",
     category: "analysis",
-    requiredContext: ["tables", "spatial"],
+    requiredContext: ["tables"],
     invalidatesCache: false,
   },
   async (
@@ -262,8 +268,17 @@ export const CreatePivotTableTool = createSimpleTool(
 
     // Get data from the source table
     const dataRange = table.range;
-    const snapshot = context.activeSheetSnapshot;
-    const cellData = snapshot.cellData || {};
+    // Use direct Univer API to get current sheet data
+    const workbookData = getWorkbookData();
+    const activeSheet = workbookData?.sheets?.find(s => s.sheetName === workbookData.activeSheetName);
+    // Convert cells array to cellData object for compatibility
+    const cellData: any = {};
+    if (activeSheet?.cells) {
+      for (const cell of activeSheet.cells) {
+        if (!cellData[cell.row]) cellData[cell.row] = {};
+        cellData[cell.row][cell.col] = { v: cell.value };
+      }
+    }
 
     // Extract and process data
     const pivotData = new Map<string, number[]>();
@@ -483,14 +498,13 @@ export const SwitchSheetTool = createSimpleTool(
         };
       }
 
-      // Invalidate context since we switched sheets
-      context.invalidateCache();
+      // Context automatically refreshes with new direct API approach
 
       return {
         action: "switch",
         sheetName,
         exists: true,
-        previousSheet: context.activeSheetName,
+        previousSheet: getWorkbookData()?.activeSheetName,
         success: true,
         message: `Successfully switched to '${sheetName}'`,
       };
@@ -550,7 +564,7 @@ export const CreateSheetTool = createSimpleTool(
             if (!success) {
               throw new Error(`Failed to switch to existing sheet '${sheetName}'`);
             }
-            context.invalidateCache();
+            // Context automatically refreshes with new direct API approach
             return {
               created: false,
               switched: true,
@@ -600,8 +614,7 @@ export const CreateSheetTool = createSimpleTool(
             }
           }
 
-          // Invalidate context since we created/switched sheets
-          context.invalidateCache();
+          // Context automatically refreshes with new direct API approach
 
           return {
             created: true,
@@ -650,7 +663,7 @@ export const CreateSheetTool = createSimpleTool(
             workbook.setActiveSheet(sheetName);
           }
 
-          context.invalidateCache();
+          // Context automatically refreshes with new direct API approach
           
           return {
             created: true,

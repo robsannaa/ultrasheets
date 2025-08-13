@@ -5,7 +5,8 @@
  */
 
 import { createSimpleTool } from "../tool-executor";
-import type { UniversalToolContext } from "../universal-context";
+import type { UniversalToolContext } from "../tool-executor";
+import { getWorkbookData } from "../univer-data-source";
 // Aggregated and Excel function tools are included via domain modules; no grouped imports needed here.
 
 /**
@@ -135,7 +136,16 @@ export const FindCellTool = createSimpleTool(
     }
 
     const foundCells = [];
-    const cellData = context.activeSheetSnapshot.cellData || {};
+    // Use direct Univer API instead of cached snapshot
+    const workbookData = getWorkbookData();
+    if (!workbookData) {
+      throw new Error("No workbook data available");
+    }
+    
+    const activeSheet = workbookData.sheets.find(s => s.sheetName === workbookData.activeSheetName);
+    if (!activeSheet) {
+      throw new Error("No active sheet found");
+    }
 
     // Determine search criteria
     let searchPattern: RegExp | string = searchValue;
@@ -171,39 +181,40 @@ export const FindCellTool = createSimpleTool(
       }
     }
 
-    // Search through cells
-    for (let row = startRow; row <= endRow; row++) {
-      const rowData = cellData[row] || {};
-      for (let col = startCol; col <= endCol; col++) {
-        const cell = rowData[col];
-        if (!cell || !cell.v) continue;
+    // Search through cells using new data structure
+    for (const cell of activeSheet.cells) {
+      // Check if cell is within search range
+      if (cell.row < startRow || cell.row > endRow || cell.col < startCol || cell.col > endCol) {
+        continue;
+      }
 
-        const cellValue = cell.v.toString();
-        let isMatch = false;
+      if (!cell.value) continue;
 
-        if (useRegex && searchPattern instanceof RegExp) {
-          isMatch = searchPattern.test(cellValue);
-        } else if (wholeWord) {
-          const exactMatch = matchCase
-            ? cellValue === searchValue
-            : cellValue.toLowerCase() === searchPattern;
-          isMatch = exactMatch;
-        } else {
-          const searchText = matchCase ? cellValue : cellValue.toLowerCase();
-          isMatch = searchText.includes(searchPattern as string);
-        }
+      const cellValue = cell.value.toString();
+      let isMatch = false;
 
-        if (isMatch) {
-          const colLetter = String.fromCharCode(65 + col);
-          const cellAddress = `${colLetter}${row + 1}`;
-          foundCells.push({
+      if (useRegex && searchPattern instanceof RegExp) {
+        isMatch = searchPattern.test(cellValue);
+      } else if (wholeWord) {
+        const exactMatch = matchCase
+          ? cellValue === searchValue
+          : cellValue.toLowerCase() === searchPattern;
+        isMatch = exactMatch;
+      } else {
+        const searchText = matchCase ? cellValue : cellValue.toLowerCase();
+        isMatch = searchText.includes(searchPattern as string);
+      }
+
+      if (isMatch) {
+        const colLetter = String.fromCharCode(65 + cell.col);
+        const cellAddress = `${colLetter}${cell.row + 1}`;
+        foundCells.push({
             address: cellAddress,
             value: cellValue,
-            row: row + 1,
+            row: cell.row + 1,
             column: colLetter,
           });
         }
-      }
     }
 
     return {
@@ -824,40 +835,20 @@ export const FindReplaceTool = createSimpleTool(
       targetRange = table.range;
     }
 
-    // If no explicit range, derive a minimal used range from snapshot
+    // If no explicit range, derive a minimal used range from workbook data
     if (!targetRange) {
-      const cellData = context.activeSheetSnapshot?.cellData || {};
-      let minRow = Number.MAX_SAFE_INTEGER,
-        maxRow = -1,
-        minCol = Number.MAX_SAFE_INTEGER,
-        maxCol = -1;
-      const toA1Col = (n: number) => {
-        let s = "";
-        n += 1;
-        while (n > 0) {
-          const m = (n - 1) % 26;
-          s = String.fromCharCode(65 + m) + s;
-          n = Math.floor((n - 1) / 26);
-        }
-        return s;
-      };
-      for (const rKey of Object.keys(cellData)) {
-        const r = Number(rKey);
-        const rowData = cellData[r];
-        if (!rowData) continue;
-        minRow = Math.min(minRow, r);
-        maxRow = Math.max(maxRow, r);
-        for (const cKey of Object.keys(rowData)) {
-          const c = Number(cKey);
-          minCol = Math.min(minCol, c);
-          maxCol = Math.max(maxCol, c);
-        }
+      const workbookData = getWorkbookData();
+      if (!workbookData) {
+        throw new Error("No workbook data available");
       }
-      if (maxRow >= 0 && maxCol >= 0) {
-        const startA1 = `${toA1Col(minCol)}${minRow + 1}`;
-        const endA1 = `${toA1Col(maxCol)}${maxRow + 1}`;
-        targetRange = `${startA1}:${endA1}`;
-      } else {
+      
+      const activeSheet = workbookData.sheets.find(s => s.sheetName === workbookData.activeSheetName);
+      if (!activeSheet || !activeSheet.usedRange) {
+        throw new Error("No data range found in active sheet");
+      }
+      // Use the already calculated used range from workbook data
+      targetRange = activeSheet.usedRange.address;
+      if (!targetRange) {
         // Nothing to do
         return {
           success: true,
