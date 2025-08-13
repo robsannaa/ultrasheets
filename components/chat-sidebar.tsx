@@ -18,45 +18,90 @@ import { CollapsibleMarkdown } from "./chat/collapsible-markdown";
 
 // ChatInput now imported from ./chat/chat-input
 
-import { extractEnhancedWorkbookData } from "../lib/enhanced-context";
-import type { CleanSheetContext } from "../lib/clean-context-tools";
+import { getChatContext, getAISummary } from "../lib/unified-context-system";
+import type { ChatContext } from "../lib/unified-context-system";
 
-// Rich workbook context with multi-table detection and recent action log
+// Rich workbook context using unified system with AI optimizations
+async function extractWorkbookDataUnified() {
+  try {
+    // Use AI-optimized context extraction
+    const chatContext = await getChatContext(undefined, {
+      format: "summary",
+      maxTokens: 1500
+    });
+    
+    const aiSummary = await getAISummary();
+    
+    return {
+      contextText: chatContext.contextText,
+      metadata: chatContext.metadata,
+      tables: aiSummary.tables,
+      selection: aiSummary.selection,
+      recommendations: aiSummary.recommendations
+    };
+  } catch (error) {
+    console.warn("Unified context extraction failed, using fallback:", error);
+    return {
+      contextText: "Spreadsheet context unavailable",
+      metadata: { tablesCount: 0, hasSelection: false, estimatedTokens: 0, contextType: "unknown" },
+      tables: [],
+      selection: { hasSelection: false },
+      recommendations: []
+    };
+  }
+}
+
+// Legacy fallback function (kept for compatibility during transition)
 function extractWorkbookData() {
-  // Use the enhanced context system
-  const enhanced = extractEnhancedWorkbookData();
+  // This will be removed after full migration
   try {
     const w: any = window as any;
     return {
-      ...enhanced,
+      sheets: [],
       cleanContext: w.__latestCleanContext || null,
     };
   } catch {
-    return enhanced;
+    return { sheets: [] };
   }
 }
 
 export function ChatSidebar({ onMobileClose }: { onMobileClose?: () => void }) {
+  const sidebarRef = useRef<HTMLDivElement>(null);
+
   const [mounted, setMounted] = React.useState(false);
   React.useEffect(() => setMounted(true), []);
 
   // Auto-close mobile sidebar after successful actions
 
-  // Capture a live clean sheet context for the LLM to use in deciding tool args
+  // Enhanced context caching with unified system
+  const [unifiedContext, setUnifiedContext] = React.useState<any>(null);
+  const [contextMetadata, setContextMetadata] = React.useState<any>(null);
+  
   React.useEffect(() => {
-    const loadClean = async () => {
+    const loadUnifiedContext = async () => {
       try {
         const w: any = window as any;
         if (!w.univerAPI) return;
-        const { getCleanSheetContext } = await import(
-          "../lib/clean-context-tools"
-        );
-        const clean = await getCleanSheetContext(w.univerAPI);
-        w.__latestCleanContext = clean;
-      } catch {}
+        
+        const contextData = await extractWorkbookDataUnified();
+        setUnifiedContext(contextData);
+        setContextMetadata(contextData.metadata);
+        
+        // Legacy compatibility
+        w.__latestUnifiedContext = contextData;
+      } catch (error) {
+        console.warn("Failed to load unified context:", error);
+      }
     };
-    loadClean();
+    
+    loadUnifiedContext();
+    
+    // Refresh context every 10 seconds or when user interacts
+    const interval = setInterval(loadUnifiedContext, 10000);
+    return () => clearInterval(interval);
   }, []);
+
+  // Parent (ResizablePanel) controls width; no internal resizer
 
   const getClientEnv = React.useCallback(() => {
     try {
@@ -90,29 +135,36 @@ export function ChatSidebar({ onMobileClose }: { onMobileClose?: () => void }) {
     // Send only client environment - LLM will use tools to get current spreadsheet state
     body: {
       clientEnv: mounted ? getClientEnv() : null,
-      // Provide lightweight recent action history to improve pronoun resolution (e.g., "format it")
+      // AI-optimized context with unified system
       workbookData: mounted
         ? (() => {
             try {
-              const extracted = extractWorkbookData();
+              // Use cached unified context or fallback
+              const contextData = unifiedContext || extractWorkbookData();
               return {
-                ...extracted,
+                ...contextData,
+                // Include context metadata for AI optimization
+                contextMetadata,
                 // ultraActionLog is populated by client-side tool executions
                 recentActions:
                   typeof window !== "undefined" &&
                   (window as any).ultraActionLog
                     ? (window as any).ultraActionLog
                     : [],
+                // Performance hint for AI
+                optimizedContext: !!unifiedContext
               };
             } catch (error) {
-              console.warn("Failed to extract workbook data:", error);
+              console.warn("Failed to extract unified context:", error);
               return {
                 sheets: [],
+                contextText: "Context extraction failed",
                 recentActions:
                   typeof window !== "undefined" &&
                   (window as any).ultraActionLog
                     ? (window as any).ultraActionLog
                     : [],
+                optimizedContext: false
               };
             }
           })()
@@ -172,10 +224,8 @@ export function ChatSidebar({ onMobileClose }: { onMobileClose?: () => void }) {
             recentExecutionsRef.current.set(semanticKey, now);
 
             // Clean up old entries (keep only last 10 seconds)
-            for (const [
-              key,
-              timestamp,
-            ] of recentExecutionsRef.current.entries()) {
+            for (const entry of Array.from(recentExecutionsRef.current.entries())) {
+              const [key, timestamp] = entry;
               if (now - timestamp > 10000) {
                 recentExecutionsRef.current.delete(key);
               }
@@ -533,24 +583,31 @@ export function ChatSidebar({ onMobileClose }: { onMobileClose?: () => void }) {
                 w.ultraActionLog = w.ultraActionLog || [];
                 w.ultraActionLog.push({
                   at: new Date().toISOString(),
-                  tool: "smart_add_column",
+                  tool: "add_column",
                   params: { count: action.actions.length },
                   result: "ok",
                 });
                 if (w.ultraActionLog.length > 50) w.ultraActionLog.shift();
               } catch {}
             } else if (action.type === "getCleanSheetContext") {
-              // Get real sheet context with zero assumptions
-              const { getCleanSheetContext } = await import(
-                "../lib/clean-context-tools"
+              // Get unified context with AI optimizations
+              const { getChatContext } = await import(
+                "../lib/unified-context-system"
               );
               const univerAPI = (window as any).univerAPI;
               if (!univerAPI) throw new Error("Univer API not available");
 
-              const cleanContext = await getCleanSheetContext(univerAPI);
+              const contextData = await getChatContext(undefined, {
+                format: "detailed",
+                maxTokens: 3000
+              });
 
-              // Return the context to the LLM by updating the message
-              console.log("🧠 Clean sheet context:", cleanContext);
+              // Return the context to the LLM
+              console.log("🧠 Unified context:", contextData);
+              
+              // Update cached context
+              setUnifiedContext(contextData);
+              setContextMetadata(contextData.metadata);
             } else if (action.type === "getCleanWorkbookState") {
               // Get full workbook state with zero assumptions
               const univerAPI = (window as any).univerAPI;
@@ -571,193 +628,77 @@ export function ChatSidebar({ onMobileClose }: { onMobileClose?: () => void }) {
 
               console.log("🔍 Clean workbook state:", workbookState);
               (window as any).__lastWorkbookState = workbookState;
-            } else if (action.type === "smartAddColumnWithContext") {
-              // Add column using SEMANTIC intelligence
-              const { getCleanSheetContext } = await import(
-                "../lib/clean-context-tools"
-              );
+            } else if (action.type === "addColumn") {
+              // Simple, precise column addition using exact Univer API
               const univerAPI = (window as any).univerAPI;
               if (!univerAPI) throw new Error("Univer API not available");
-
-              const cleanContext = await getCleanSheetContext(univerAPI);
-              const { columnName, formulaPattern, defaultValue } =
-                action.params;
-
-              // Find the best table to add column to
-              const targetRegion = cleanContext.analysis.dataRegions[0];
-              if (!targetRegion) throw new Error("No data regions found");
-
-              // Smart column positioning logic
-              // Robust A1 helpers and anchor resolution (supports AA, AB, ...)
-              const letterToIndex = (letters: string): number => {
-                let idx = 0;
-                const up = letters.toUpperCase();
-                for (let i = 0; i < up.length; i++) {
-                  idx = idx * 26 + (up.charCodeAt(i) - 64);
+              
+              const { sheetName, insertAtColumn, columnName, defaultValue } = action.params;
+              const workbook = univerAPI.getActiveWorkbook();
+              let worksheet = workbook.getActiveSheet();
+              
+              // Switch to specified sheet if provided
+              if (sheetName && typeof workbook.getSheetByName === "function") {
+                const targetSheet = workbook.getSheetByName(sheetName);
+                if (targetSheet) {
+                  worksheet = targetSheet;
+                  workbook.setActiveSheet(sheetName);
                 }
-                return idx - 1; // 0-based
-              };
-              const indexToLetter = (index: number): string => {
-                let n = index + 1;
-                let s = "";
-                while (n > 0) {
-                  const rem = (n - 1) % 26;
-                  s = String.fromCharCode(65 + rem) + s;
-                  n = Math.floor((n - 1) / 26);
-                }
-                return s;
-              };
-              const resolveAnchorToLetter = (
-                anchor: string | number
-              ): string | null => {
-                if (typeof anchor === "number")
-                  return indexToLetter(anchor - 1);
-                const text = String(anchor).trim();
-                if (/^[A-Za-z]+$/.test(text)) return text.toUpperCase();
-                if (/^\d+$/.test(text))
-                  return indexToLetter(parseInt(text, 10) - 1);
-                const headers: string[] = (targetRegion as any).headers || [];
-                const headerIdx = headers.findIndex(
-                  (h) => String(h).toLowerCase() === text.toLowerCase()
-                );
-                if (headerIdx >= 0) {
-                  const match = (targetRegion as any).range.match(
-                    /([A-Z]+)\d+:([A-Z]+)\d+/
-                  );
-                  if (match) {
-                    const startLetter = match[1];
-                    const startIndex = letterToIndex(startLetter);
-                    return indexToLetter(startIndex + headerIdx);
+              }
+              
+              // Convert column letter to index for insertion
+              const colIndex = insertAtColumn.charCodeAt(0) - 65;
+              
+              // Insert column using precise Univer API
+              if (typeof worksheet.insertColumns === "function") {
+                worksheet.insertColumns(colIndex, 1);
+              }
+              
+              // Set header if provided
+              if (columnName) {
+                worksheet.getRange(0, colIndex, 1, 1).setValue(columnName);
+              }
+              
+              // Set default values if provided
+              if (defaultValue !== undefined) {
+                // Detect actual data range instead of hardcoding 10 rows
+                try {
+                  // Find the last row with data by checking multiple columns
+                  let lastDataRow = 0;
+                  const maxColumnsToCheck = Math.min(colIndex, 10); // Check up to 10 columns or up to insertion point
+                  
+                  for (let checkCol = 0; checkCol < maxColumnsToCheck; checkCol++) {
+                    // Check each column for data up to row 100 (reasonable limit)
+                    for (let checkRow = 1; checkRow <= 100; checkRow++) {
+                      const cell = worksheet.getRange(checkRow, checkCol, 1, 1);
+                      const value = cell.getValue();
+                      if (value !== null && value !== undefined && value !== "") {
+                        lastDataRow = Math.max(lastDataRow, checkRow);
+                      }
+                    }
                   }
-                }
-                return null;
-              };
-              let targetColumnLetter: string;
-              {
-                // Default: insert immediately AFTER the table's last column
-                const match = (targetRegion as any).range.match(
-                  /([A-Z]+)\d+:([A-Z]+)\d+/
-                );
-                if (!match) throw new Error("Invalid region range");
-                const endLetter = match[2];
-                const endIndex = letterToIndex(endLetter);
-                targetColumnLetter = indexToLetter(endIndex + 1);
-                console.log(
-                  `📍 Positioning: Default after table end → ${targetColumnLetter}`
-                );
-              }
-
-              const headerRow = parseInt(targetRegion.range.match(/\d+/)![0]);
-              const worksheet = univerAPI.getActiveWorkbook().getActiveSheet();
-
-              // Always insert a new column at the resolved position (keeps grid consistent)
-              {
-                const targetColIndex = letterToIndex(targetColumnLetter);
-                console.log(
-                  `📍 Inserting new column at index ${targetColIndex} (letter ${targetColumnLetter})`
-                );
-
-                // Use correct Univer.js API: insertColumns (plural) not insertColumn
-                if (typeof worksheet.insertColumns === "function") {
-                  worksheet.insertColumns(targetColIndex, 1);
-                  console.log(
-                    `✅ Successfully inserted column using insertColumns API`
-                  );
-                } else {
-                  console.warn(
-                    "⚠️ insertColumns method not available, column insertion skipped"
-                  );
-                  // Fallback: proceed without actual insertion (data will be added to target position)
+                  
+                  // If we found data, fill from row 1 to lastDataRow, otherwise don't fill anything
+                  if (lastDataRow > 0) {
+                    for (let row = 1; row <= lastDataRow; row++) {
+                      worksheet.getRange(row, colIndex, 1, 1).setValue(defaultValue);
+                    }
+                    console.log(`✅ Added column with default values for ${lastDataRow} data rows`);
+                  } else {
+                    console.log(`ℹ️ No existing data detected, skipping default value fill`);
+                  }
+                } catch (error) {
+                  console.warn("Failed to detect data range, skipping default values:", error);
                 }
               }
-
-              // 🧠 SEMANTIC INTELLIGENCE: Auto-detect if this column needs a calculation
-              let smartFormula = formulaPattern;
-
-              if (!smartFormula && (targetRegion as any).semanticAnalysis) {
-                // Look for matching calculation in semantic analysis
-                const matchingCalc = (
-                  targetRegion as any
-                ).semanticAnalysis.possibleCalculations.find(
-                  (calc: any) =>
-                    calc.newColumnName.toLowerCase() ===
-                      columnName.toLowerCase() ||
-                    columnName
-                      .toLowerCase()
-                      .includes(calc.newColumnName.toLowerCase()) ||
-                    calc.newColumnName
-                      .toLowerCase()
-                      .includes(columnName.toLowerCase())
-                );
-
-                if (matchingCalc) {
-                  smartFormula = matchingCalc.formula;
-                  console.log(
-                    `🧠 SEMANTIC MATCH: "${columnName}" → ${matchingCalc.description}`
-                  );
-                  console.log(`📊 Auto-generated formula: ${smartFormula}`);
-                }
-              }
-
-              // Add header
-              const headerColIndex = targetColumnLetter.charCodeAt(0) - 65;
-              const headerRowIndex = headerRow - 1;
-              worksheet
-                .getRange(headerRowIndex, headerColIndex, 1, 1)
-                .setValue(columnName);
-
-              // Add data with intelligent formula or fallback
-              if (smartFormula) {
-                for (let i = 1; i <= targetRegion.rowCount; i++) {
-                  const dataRow = headerRow + i;
-                  const formula = smartFormula.replace(
-                    /\{row\}/g,
-                    dataRow.toString()
-                  );
-                  const finalFormula = formula.startsWith("=")
-                    ? formula
-                    : `=${formula}`;
-                  worksheet
-                    .getRange(headerRowIndex + i, headerColIndex, 1, 1)
-                    .setValue(finalFormula);
-                }
-                console.log(
-                  `✨ Added column "${columnName}" with intelligent formula: ${smartFormula}`
-                );
-              } else if (defaultValue !== undefined) {
-                for (let i = 1; i <= targetRegion.rowCount; i++) {
-                  worksheet
-                    .getRange(headerRowIndex + i, headerColIndex, 1, 1)
-                    .setValue(defaultValue);
-                }
-                console.log(
-                  `✅ Added column "${columnName}" with default value: ${defaultValue}`
-                );
-              } else {
-                console.log(
-                  `ℹ️ Added empty column "${columnName}" - no semantic match found`
-                );
-              }
-
-              // Record a rich recent action so follow-ups like "format it" can target this column
+              
               try {
-                const headerCell = `${targetColumnLetter}${headerRow}`;
-                const dataRange = `${targetColumnLetter}${
-                  headerRow + 1
-                }:${targetColumnLetter}$${
-                  headerRow + targetRegion.rowCount
-                }`.replace(/\$+/g, "");
                 const w: any = window as any;
                 w.ultraActionLog = w.ultraActionLog || [];
                 w.ultraActionLog.push({
                   at: new Date().toISOString(),
-                  tool: "smart_add_column",
-                  params: {
-                    columnName,
-                    headerCell,
-                    dataRange,
-                    tableRange: targetRegion.range,
-                  },
+                  tool: "add_column",
+                  params: action.params,
                   result: "ok",
                 });
                 if (w.ultraActionLog.length > 50) w.ultraActionLog.shift();
@@ -782,32 +723,12 @@ export function ChatSidebar({ onMobileClose }: { onMobileClose?: () => void }) {
     const univerAPI = (window as any).univerAPI;
     if (!univerAPI) throw new Error("Univer API not available");
 
-    // Allow special, explicit target tokens resolved via Univer context
-    // __AUTO_HEADERS__: resolve to header row of the primary data region (first detected region)
-    if (action?.range === "__AUTO_HEADERS__") {
-      const { getCleanSheetContext } = await import(
-        "../lib/clean-context-tools"
-      );
-      const clean = await getCleanSheetContext(univerAPI);
-      const region = clean?.analysis?.dataRegions?.[0];
-      if (!region?.range)
-        throw new Error("No data region found to resolve headers range");
-      const match = region.range.match(/([A-Z]+)(\d+):([A-Z]+)(\d+)/);
-      if (!match) throw new Error(`Invalid region range: ${region.range}`);
-      const startCol = match[1];
-      const startRow = parseInt(match[2], 10);
-      const endCol = match[3];
-      // Header row is the first row of the region
-      action = {
-        ...action,
-        range: `${startCol}${startRow}:${endCol}${startRow}`,
-      };
-    }
+    // All ranges must be explicitly provided - no auto-resolution
 
     await applyFormatting(univerAPI, action);
   };
 
-  // Smart typing indicator: show only until first assistant tokens arrive
+  // Typing indicator: show only until first assistant tokens arrive
   const lastMsg: any = messages[messages.length - 1];
   const assistantHasContent =
     lastMsg?.role === "assistant" &&
@@ -829,32 +750,39 @@ export function ChatSidebar({ onMobileClose }: { onMobileClose?: () => void }) {
 
   return (
     <div
-      className={`h-full flex flex-col bg-background border rounded-2xl m-1`}
+      ref={sidebarRef}
+      className={"border-l bg-card flex flex-col h-full relative rounded-l-xl"}
     >
       {/* Only show header on desktop */}
       {!onMobileClose && (
-        <div className="px-2 border-b">
-          <div className="flex items-center justify-between">
-            <h2 className="text-base font-semibold">CellChat</h2>
-            <Image src="/logo.png" alt="CellChat" width={64} height={64} />
-          </div>
+        <div className="p-4 border-b rounded-tl-xl">
+          <h2 className="font-semibold text-lg">Chat Assistant</h2>
+          <p className="text-sm text-muted-foreground">
+            AI-powered conversation
+          </p>
         </div>
       )}
 
-      <div className="flex-1 overflow-hidden" suppressHydrationWarning>
+      <div className="flex-1 relative overflow-hidden" suppressHydrationWarning>
+        <div className="absolute top-0 left-0 right-0 h-8 bg-gradient-to-b from-card to-transparent z-10 pointer-events-none rounded-tl-xl" />
         {mounted ? (
-          <ChatMessages messages={messages} isLoading={isLoading} />
+          <ChatMessages 
+            messages={messages} 
+            isLoading={isLoading} 
+            aiPerformanceMode={contextMetadata?.contextType === 'analysis' || contextMetadata?.estimatedTokens > 1500}
+          />
         ) : (
           <div className="h-full" />
         )}
       </div>
 
-      <div className={`${onMobileClose ? "p-3" : "px-3 py-3"}`}>
+      <div className="p-2 border-t bg-background rounded-bl-xl">
         <ChatInput
           input={input}
           handleInputChange={handleInputChange}
           handleSubmit={handleSubmit}
           isLoading={mounted ? isLoading : true}
+          contextMetadata={contextMetadata}
         />
       </div>
     </div>
@@ -862,52 +790,4 @@ export function ChatSidebar({ onMobileClose }: { onMobileClose?: () => void }) {
 }
 
 // CollapsibleMarkdown now imported from ./chat/collapsible-markdown
-
-function describeTool(toolName: string, args: any): string {
-  switch (toolName) {
-    case "list_columns":
-      return "List columns";
-    case "calculate_total":
-      return `Total for ${args?.column ?? "column"}`;
-    case "add_smart_totals":
-      return `Smart totals${
-        args?.columns
-          ? ` for ${args.columns.join(", ")}`
-          : " for all calculable columns"
-      }`;
-    case "format_recent_totals":
-      return `Format recent totals as ${args?.currency || "USD"}`;
-    case "format_currency_column":
-      return `Format currency column as ${args?.currency || "USD"}`;
-    case "create_pivot_table":
-      return `Pivot by ${args?.groupBy ?? "group"}`;
-    case "generate_chart":
-      return `${args?.chart_type ?? "chart"} chart${
-        args?.title ? `: ${args.title}` : ""
-      }`;
-    case "switch_sheet":
-      return `${args?.action === "switch" ? "Switch to" : "Analyze"} ${
-        args?.sheetName ?? "sheet"
-      }`;
-    case "financial_intelligence":
-      return `Analyze: ${String(args?.user_request ?? "")}`;
-    case "add_filter":
-      return "Apply filter";
-    case "conditional_formatting":
-      return "Conditional formatting";
-    case "set_cell_formula":
-      return `Set formula`;
-    case "find_cell":
-      return "Find cell";
-    case "format_as_table":
-      return `Format as table`;
-    case "ask_for_range":
-      return "Need range specification";
-    case "get_sheet_context":
-      return "Analyze spreadsheet";
-    case "get_workbook_snapshot":
-      return "Analyze workbook";
-    default:
-      return "Processing";
-  }
-}
+// describeTool function moved to chat-messages.tsx to avoid duplication

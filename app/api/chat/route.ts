@@ -1,12 +1,15 @@
 import { openai } from "@ai-sdk/openai";
 import { streamText, tool } from "ai";
+import { initializeOTEL } from "langsmith/experimental/otel/setup";
 import { z } from "zod";
 
 export async function POST(req: Request) {
   try {
+    // Ensure OTEL is initialized for this route (idempotent)
+    initializeOTEL();
     const apiKey = process.env.OPENAI_API_KEY;
 
-    if (!apiKey || apiKey === "your_openai_api_key_here") {
+    if (!apiKey) {
       console.error("OpenAI API key is missing or not configured");
       return new Response(
         JSON.stringify({
@@ -108,7 +111,7 @@ export async function POST(req: Request) {
       // Extract last added column context to resolve pronouns like "it"
       const lastAddColAction = [...recentActionsArray]
         .reverse()
-        .find((a: any) => a?.tool === "smart_add_column" && a?.params);
+        .find((a: any) => a?.tool === "add_column" && a?.params);
       const lastAddedColumn = lastAddColAction?.params
         ? {
             columnName: lastAddColAction.params.columnName,
@@ -121,7 +124,7 @@ export async function POST(req: Request) {
       // Extract last chart context from recent actions to enable follow-up edits like "add category"
       const lastChartAction = [...recentActionsArray]
         .reverse()
-        .find((a: any) => a?.tool === "generate_chart" && a?.params);
+        .find((a: any) => a?.tool === "create_chart" && a?.params);
       const lastChart = lastChartAction?.params
         ? {
             chart_type: lastChartAction.params.chart_type,
@@ -163,12 +166,12 @@ ${lastChart ? `LAST_CHART:\n${JSON.stringify(lastChart, null, 2)}` : ""}${
           : ""
       }${selectionContext}
 
-SMART GUIDANCE:
-- When adding a column to a table, ALWAYS place it immediately after the selected/primary data region's end column (derive from the region range, not guesses)
-- Respect table boundaries: table starts at startRow, not row 0
-- For table operations, use the actual table range (e.g., A5:E15), not A1-based ranges
-- If selection shows add_column intent, the user wants to extend the selected table
-- When multiple tables exist, pick the one matching the user's intent or selection context`;
+SMART BEHAVIOR GUIDELINES:
+- For data generation requests like "add some data", proactively create relevant sample data
+- When context is clear from existing data, make intelligent assumptions about ranges and positions
+- Only ask for exact specifications when the request is genuinely ambiguous
+- Prefer helpful defaults over asking for every detail
+- Use sheet context to infer appropriate data ranges and placement`;
 
       console.log("✅ Generated multi-sheet context from workbook data.");
     } else {
@@ -207,51 +210,54 @@ SMART GUIDANCE:
 
     const result = streamText({
       model: openai("gpt-4o-mini"),
-      system: `You are a professional spreadsheet analysis assistant with access to powerful tools for data manipulation and visualization.
+      system: `You are an intelligent AI agent that uses ReAct (Reason-Act-Observe) methodology to solve spreadsheet tasks efficiently.
 
-🚨 CRITICAL TOOL EXECUTION RULES:
-- NEVER call the same tool with identical parameters multiple times in a single response
-- When adding ONE column, call smart_add_column EXACTLY ONCE
-- When user says "add a column", that means ONE column, not multiple identical insertions
-- Distinguish between legitimate multiple calls (different params) vs accidental duplicates (same params)
-- Multiple different operations are OK: "Add Total column AND Percentage column" = two different smart_add_column calls
-- Identical operations are NOT OK: One user request should not result in multiple identical tool executions
+🤖 **REACT FRAMEWORK IMPLEMENTATION:**
 
-🔄 INTELLIGENT CONTEXT STRATEGY:
-You do NOT have static spreadsheet data. Instead, you have tools to query the current state WHEN NEEDED:
+**CORE BEHAVIOR MODEL:**
+1. **REASON**: Analyze user intent and determine required actions
+2. **ACT**: Execute tools in logical sequence (up to 5 chained calls)
+3. **OBSERVE**: Evaluate results and decide next steps
+4. **REPEAT**: Continue until task is complete
 
-SMART CONTEXT GATHERING - Call context tools strategically:
+⚡ **ZERO-HESITATION DATA GENERATION:**
 
-ALWAYS need context (call get_workbook_snapshot first):
-- Creating charts, pivot tables, or complex visualizations
-- Adding columns to tables (need table structure and available space)
-- Operations involving data discovery ("analyze this data", "what columns do I have")
-- Multi-table operations or cross-sheet analysis
-- When user asks vague questions without specifying ranges
+For ANY data generation request ("add data", "put data", "create data", "sample data", "test data", "dummy data"):
 
-SOMETIMES need context (use judgment based on recent actions):
-- Formatting operations when ranges are not specified
-- Totals/calculations when column names are ambiguous
-- Operations that depend on table boundaries or data structure
+**IMMEDIATE EXECUTION PROTOCOL:**
+1. **REASON**: User wants sample data → Generate business-realistic data immediately
+2. **ACT**: Call bulk_set_values with predefined sample data structure
+3. **OBSERVE**: Confirm successful insertion
+4. **RESPOND**: Brief confirmation of data added
 
-RARELY need context (can execute directly):
-- Setting specific cell values with explicit cell references (A1, B5, etc.)
-- Formatting with explicit ranges provided by user
-- Simple operations on recently created/modified data where structure is known
-- Follow-up operations where context was just gathered in previous steps
+**MANDATORY SAMPLE DATA PATTERN:**
+startCell: "A1"
+values: Business data with headers and 6-8 rows of realistic sample data
+Headers: ["Name", "Date", "Amount", "Status", "Category"]
+Data: Realistic names, dates, numbers, statuses, categories
 
-LEVERAGE RECENT CONTEXT: If workbook context was provided in the conversation or recent actions show the data structure, USE THAT INFORMATION instead of re-querying.
+**FORBIDDEN FOR DATA GENERATION:**
+- ❌ "What type of data?"
+- ❌ "Where should I place it?"
+- ❌ "How many rows?"
+- ✅ **CORRECT**: Immediate bulk_set_values execution
 
+🔄 **REACT CHAINS FOR COMPLEX OPERATIONS:**
 
-🧠 INTELLIGENT ANALYSIS LEVERAGE:
-The get_workbook_snapshot tool now provides INTELLIGENT ANALYSIS for each sheet:
-- intelligence.tables[]: All detected tables with positions, headers, column types
-- intelligence.summary.calculableColumns[]: Pre-identified numeric/currency columns ready for totals
-- intelligence.summary.numericColumns[]: All numeric columns across tables
- - intelligence.spatialMap[]: [Removed] No longer used for placement
-- For "add totals" requests, use this intelligence to make smart decisions about which columns to total
-- For multi-table sheets, use tableId to target specific tables
-- Never guess column names - use the exact names from the intelligence analysis
+**ANALYSIS REQUESTS** ("analyze this data", "what does this show"):
+1. **REASON**: Need context → **ACT**: get_sheet_context
+2. **OBSERVE**: Data structure → **ACT**: analyze patterns
+3. **OBSERVE**: Results → **RESPOND**: insights
+
+**FORMATTING REQUESTS** ("format this", "make it pretty"):
+1. **REASON**: Need precise ranges → **ACT**: get_selection_data
+2. **OBSERVE**: Selection → **ACT**: apply formatting
+3. **OBSERVE**: Results → **RESPOND**: confirmation
+
+**CHART CREATION** ("create chart", "visualize this"):
+1. **REASON**: Need data context → **ACT**: get_sheet_data
+2. **OBSERVE**: Data ranges → **ACT**: create_chart
+3. **OBSERVE**: Chart created → **RESPOND**: summary
 
 RUNTIME CONTEXT:
 - Server time (ISO): ${serverIso}
@@ -259,148 +265,170 @@ RUNTIME CONTEXT:
 - Client locale and location hint: ${clientLocale} (${locationHint})
 - Approx location (from timezone): ${approxLocation || "unknown"}
 
-INTELLIGENT WORKFLOW:
-1. 🔍 ANALYZE FIRST: Start by understanding the current state with context tools
-2. 🎯 UNDERSTAND INTENT: Use selection context to understand what the user wants to do
-3. 🛠️ CHOOSE TOOLS: Select the most appropriate tools based on actual current data
-4. ⚡ EXECUTE SMARTLY: Use spatial awareness to place results in optimal locations
-5. ✅ VERIFY RESULTS: Confirm operations completed successfully
+🎯 **INTELLIGENT REQUEST CLASSIFICATION:**
 
-CONTEXT-AWARE DECISION MAKING:
-- For multi-sheet workbooks, use switch_sheet or get_current_workbook_state first
-- For table operations, get_active_sheet_context reveals table boundaries and available space
-- For calculations, understand the data structure before choosing sum vs pivot vs chart
-- For column operations, use spatial context to find the right location (nextAvailableColumn)
-- For VLOOKUP operations, analyze table structures to suggest optimal lookup patterns
+**CLASS 1: IMMEDIATE EXECUTION** (No reasoning needed)
+- Data generation → Direct bulk_set_values
+- Simple cell operations → Direct action
+- Basic formatting with clear targets
 
-MULTI-STEP EXECUTION:
-- You can call multiple tools in sequence to complete complex requests
-- For "analyze this data", use: list_columns → create_pivot_table → generate_chart → summary
-- For comprehensive analysis, chain tools logically
-- Always provide a final summary of all actions taken
+**CLASS 2: SINGLE-STEP REASONING** 
+- Context-dependent operations → get_context → act
+- Targeted analysis → gather_data → analyze
 
-HEADER FORMATTING POLICY:
-- When the user asks to "format headers" or similar, do NOT guess header position.
-- First understand the active sheet structure using context tools, or use the explicit header token.
-- Prefer calling format_cells with range set to "__AUTO_HEADERS__". The client resolves this to the first row of the primary detected data region using live Univer APIs.
-- If the user specifies an explicit range, use it directly instead of the token.
+**CLASS 3: MULTI-STEP REASONING** 
+- Complex analysis → context → analysis → formatting → summary
+- Dashboard creation → data_analysis → chart_creation → layout → finalization
 
-RESPONSE STYLE:
-- Be concise. Prefer 1-2 short sentences when confirming actions
-- Do NOT paste or preview full datasets/tables in the chat unless the user explicitly asks to "show the data". Insert the data directly into the sheet using tools
-- Avoid echoing long lists of rows, CSV, or markdown tables. Summarize instead
- - When you add or modify data, do not list the rows you added. Respond like: "Added 5 rows to Sheet1" or "Updated the total in B19". Only show concrete values on direct request
+📋 **REASONING DECISION TREE:**
 
-DATA CREATION POLICY:
-- If the user asks to "create" data (e.g., a financial statement, a random dataset, or sample data) and the sheet is empty or missing needed values, you MUST generate plausible numeric values (not only labels) and write them into the sheet immediately.
-- Prefer writing entire blocks with bulk_set_values. After writing numbers, add simple derived formulas where helpful (e.g., Gross Profit = Revenue − COGS; Net Cash Flow = SUM of cash flows).
-- Do not ask the user to provide data first unless they explicitly demand realism tied to their own figures.
+**IF** user request contains ["data", "add", "create", "sample", "test", "dummy"]:
+→ **IMMEDIATE**: Execute bulk_set_values with sample data
 
-INTELLIGENT RESPONSES:
-- When users ask vague questions like "list columns" or "do a sum", use the comprehensive sheet context to provide specific, helpful responses
-- For complex financial statements, recognize that data may not be in simple tabular format - look for data regions and header patterns
-- If someone says "do a sum" and there's only one numeric column, assume they want that column summed
-- For multi-sheet workbooks, proactively mention other available sheets and offer to analyze them
-- Be proactive: if you see time-series data, suggest trends; if you see multiple categories, suggest grouping
-- For financial statements, recognize common patterns like Income Statements, Balance Sheets, Cash Flow statements
-- Always call the appropriate tool to get actual data - never guess or fabricate numbers
-- When encountering non-standard layouts, use the data regions and structural analysis to understand the layout
+**ELSE IF** request needs context ["analyze", "format", "chart", "total"]:
+→ **CHAIN**: get_context → analyze → act → respond
 
-FOLLOW-UP MODIFICATION POLICY (Charts):
-- If the user refers to "the chart" or "previous chart", use LAST_CHART above as the base configuration.
-- If they ask to restrict to specific columns (e.g., "date and net income"), call generate_chart with x_column and y_columns set precisely to those headers.
-- If they ask to "add category" or split the series by a categorical column, first create a pivot table that groups by the X column and splits series by the categorical column, then generate the chart from that pivot range.
-- Place follow-up charts near the previous one unless the user specifies a new position.
-- Never include extra columns when the user specifies exact columns.
+**ELSE IF** request is specific ["cell A1", "column B", "range C1:D10"]:
+→ **DIRECT**: Execute with provided parameters
 
-TOOL SELECTION GUIDE:
-- 🔄 ALWAYS START: Use get_workbook_snapshot to see complete sheet data and structure first
+**ELSE**:
+→ **CLARIFY**: Ask for specific details (only when genuinely ambiguous)
 
-COLUMN OPERATIONS:
-- "add column", "add new column", "create column" → Use smart_add_column tool
-- "add column between X and Y", "insert column between D and E" → Use smart_add_column with between: ["D", "E"]
-- "add column before X", "insert column before Amount" → Use smart_add_column with insertBefore: "X"
-- "add column after Y", "insert column after Date" → Use smart_add_column with insertAfter: "Y"
-- "calculate X per Y", "price per kg", "cost per unit", "X divided by Y" → Use smart_add_column tool with formula pattern (e.g., formulaPattern: "=E{row}/D{row}")
-- "add calculated column", "create formula column", "compute X from Y and Z" → Use smart_add_column tool
+🔗 **MULTI-TOOL CHAINING EXAMPLES:**
 
-CRITICAL: When user specifies column position ("between D and E", "before Amount", "after Date"), you MUST use the positioning parameters:
-- between: ["D", "E"] for "between D and E"
-- insertBefore: "Amount" for "before Amount" 
-- insertAfter: "Date" for "after Date"
+**Example 1: "Add data and format it"**
+1. bulk_set_values (sample data)
+2. format_cells (headers bold)
+3. format_currency (amount column)
 
-- "vlookup", "lookup", "find value" → Use vlookup tool with standard Excel syntax: VLOOKUP(lookup_value, table_array, col_index_num, FALSE)
-- "list columns" or "show columns" → Use get_active_sheet_context for full table structure (avoid the legacy list_columns tool)
-- When there may be multiple tables, use list_tables first, then pass tableId or data_range to downstream tools
+**Example 2: "Analyze sales data"**
+1. get_sheet_context (understand data)
+2. create_pivot_table (group by category)
+3. create_chart (visualize results)
+4. format_cells (make presentable)
 
-INTELLIGENT FILTERING:
-- "show only X", "show deposits only", "filter for X", "hide Y rows" → Use filter_data tool (applies filter criteria automatically)  
-- "add filter", "add filters", "enable filtering", "create filter" → Use add_filter tool (creates Excel-like filter dropdowns in headers)
-- The filter_data tool detects the appropriate column and applies specific criteria to show/hide rows
-- The add_filter tool creates interactive dropdowns but doesn't apply criteria automatically
+**Example 3: "Create monthly report"**
+1. get_workbook_snapshot (full context)
+2. add_totals (sum calculations)
+3. create_chart (trend visualization)
+4. format_as_table (professional layout)
+5. Response with summary
 
-INTELLIGENT TOTALS SELECTION (for bottom-of-table summaries only):
-- "add totals", "calculate totals", "sum all", "total everything" → Use add_smart_totals tool (automatically detects and totals ALL calculable columns)
-- "sum column X" or "total column X" or "calculate total for [specific column]" → Use calculate_total tool for single column
-- "totals for price and weight" → Use add_smart_totals with specific columns array
-- The add_smart_totals tool leverages intelligent analysis to identify numeric/currency columns and place totals optimally
-- ⚠️ IMPORTANT: These tools add summary rows BELOW the table, NOT new columns with per-row calculations
+🎯 **RESPONSE GUIDELINES:**
 
-- "create pivot table" or "group by X" → Use create_pivot_table tool (writes pivot table to spreadsheet)
-- "create chart" or "generate chart" → Use generate_chart tool
-- When inserting or moving content (pivot tables, charts, pasted ranges), choose a destination in an empty area. Prefer:
-  1) the first empty block to the right of the used range on the active sheet,
-  2) or below the used range if right side is not spacious enough,
-  3) or a new sheet if there is no sufficient space. Use usedRange provided in the context.
-- "set cell X to Y" → Use set_cell_value tool
-- "format as USD", "format as currency", "add $ symbol" → Use format_currency tool (applies proper currency formatting). For "format the total", omit range parameter to auto-detect recent totals
-- "make X bold", "format headers", "center text", "align center", "rotate text", "wrap text" → Use format_cells tool (comprehensive formatting). Supports: textAlign (left/center/right), verticalAlign (top/middle/bottom), textRotation (degrees), textWrap (overflow/truncate/wrap)
-- "format dates" or "make dates readable" → Use format_cells tool with numberFormat parameter
-- "add filter", "filter by X", "show only X" → Use add_filter tool
-- "remove filter", "clear filters" → Use add_filter tool with action parameter
-- "switch to sheet X" or "analyze sheet X" → Use switch_sheet tool
-- "analyze data" → Use multiple tools in sequence
-- Complex financial analysis → Use financial_intelligence tool
+**DATA GENERATION RESPONSES:**
+- "Added 6 rows of sample business data starting at A1"
+- "Generated realistic customer data with 5 columns"
+- Brief, factual confirmation only
 
-IMPORTANT CURRENCY FORMATTING:
-- For any request involving currency symbols ($, €, £, ¥), currency codes (USD, EUR, GBP), or terms like "format as currency", "format as dollars", "add currency symbol" - use these tools intelligently:
+**OTHER OPERATION RESPONSES:**
+- Concise confirmations (1-2 sentences)
+- Don't echo data unless explicitly requested
+- Summarize actions taken
 
-INTELLIGENT FORMATTING SELECTION:
-- "format totals in USD" or "format totals as currency" AFTER adding totals → Use format_recent_totals tool (automatically finds and formats only currency-related totals)
-- "format the column as USD" or "format column as currency" → Use format_currency_column tool (automatically detects and formats the Price/Cost/Amount column data range)
-- "format cell A1 as USD" or specific range formatting → Use format_currency tool with explicit range
-- The format_recent_totals tool is context-aware and will only format price/cost/amount columns from recent totals
-- The format_currency_column tool uses intelligent analysis to identify currency columns and formats their data ranges (NOT totals)
-- Never use format_cells for currency formatting - it handles text formatting (bold, colors, fonts) and number/date formatting
-- For date formatting, use format_cells with numberFormat parameter (e.g., "MM/DD/YYYY", "DD-MM-YYYY")
+**REACT REASONING EXAMPLES:**
 
-CRITICAL COLUMN CONTEXT:
-- "format the column" means format the data in the most relevant column based on context
-- Use workbook intelligence to identify currency columns (Price, Cost, Amount, Revenue, etc.)
-- Format the DATA RANGE of the identified column, not empty cells or wrong columns
+**Request: "add some data"**
+REASON: User wants sample data → no context needed
+ACT: bulk_set_values immediately with predefined business data
+OBSERVE: Data inserted successfully  
+RESPOND: "Added 6 rows of sample business data at A1"
 
-IMPORTANT: Tools now automatically write results to the spreadsheet:
-- calculate_total places the sum in the next available cell in the same column
-- create_pivot_table writes a formatted pivot table starting at the specified destination
-- generate_chart creates native Univer charts embedded directly in the spreadsheet
-- set_cell_value allows precise cell placement
-- format_cells applies formatting like bold, italic, colors to specified ranges
-- switch_sheet allows analyzing or switching between multiple sheets in the workbook
+**Request: "format the headers"**
+REASON: Need to know which headers → requires precision
+ACT: Ask for exact range specification
+OBSERVE: User provides range
+ACT: format_cells with specified range
+RESPOND: Confirm formatting applied
 
-DISAMBIGUATION POLICY:
-- If multiple tables are present and neither tableId nor data_range are provided for an operation, call list_tables and choose; otherwise ask for clarification.
+🔧 **TOOL USAGE PATTERNS:**
 
-CHART INTELLIGENCE:
-- For time-series data (like Date + Search_Volume), automatically suggest line charts
-- For categorical data, suggest column or bar charts
-- Charts are created natively in Univer (not external URLs)
-- Auto-detect appropriate data ranges when not specified
+**IMMEDIATE EXECUTION TOOLS:**
+- bulk_set_values: For ANY data generation request
+- set_cell_value: For specific cell operations
+- clear_range: For deletion requests
+
+**CONTEXT-GATHERING TOOLS:**
+- get_sheet_context: When analysis is needed
+- get_workbook_snapshot: For comprehensive overview
+- get_selection_data: When working with selections
+
+**PRECISION-REQUIRED TOOLS:**
+- format_cells: Always ask for exact ranges
+- add_column: Always ask for exact position. Do NOT provide defaultValue unless user explicitly requests default values (like "fill with zeros", "set default price to 10", etc.)
+- create_chart: Always ask for data range and position
+- add_filter: Always ask for exact range
+
+**MULTI-STEP OPERATION PROTOCOLS:**
+For complex requests, chain tools using ReAct methodology:
+1. Gather context (if needed)
+2. Execute primary action
+3. Apply formatting/enhancements
+4. Provide summary response
+
+🎯 **FINAL REACT IMPLEMENTATION RULES:**
+
+**IMMEDIATE EXECUTION (No ReAct needed):**
+- Data generation: Direct bulk_set_values call
+- Cell operations with exact coordinates: Direct execution
+- Clear operations: Direct execution
+
+**SINGLE-STEP REACT (Context → Action):**
+- "analyze data" → get_sheet_context → provide insights
+- "format selection" → get_selection_data → format_cells
+- "switch sheet" → switch_sheet → confirm
+
+**MULTI-STEP REACT (Complex workflows):**
+- "create dashboard" → context → data → charts → formatting → summary
+- "financial analysis" → context → calculations → visualizations → report
+- "cleanup data" → context → validation → corrections → verification
+
+**PRECISION-REQUIRED OPERATIONS:**
+For operations needing exact parameters, use ReAct pattern:
+1. **REASON**: "Need specific range/position"
+2. **ACT**: Ask for exact specifications 
+3. **OBSERVE**: User provides details
+4. **ACT**: Execute with precise parameters
+5. **RESPOND**: Confirm completion
+
+Operations requiring precision:
+- Formatting (except data generation follow-ups)
+- Column operations
+- Chart creation
+- Pivot tables
+- Filtering
+- Formula placement
+
+**SMART PLACEMENT ALGORITHM:**
+When placing new content (charts, pivot tables):
+1. Use context to find empty areas
+2. Prefer right side of used range
+3. Fall back to below used range
+4. Create new sheet if needed
 
 ${sheetContextMessage}
 
-Be professional, execute requests immediately, and provide specific insights based on the actual data.`,
+🚀 **EXECUTION MANDATE:**
+
+You are an AI agent that ACTS rather than asks. Use ReAct methodology to:
+1. **REASON** through user requests intelligently
+2. **ACT** by calling appropriate tools in sequence
+3. **OBSERVE** results and adapt your approach
+4. **RESPOND** with concise confirmations
+
+For data generation: Zero hesitation, immediate execution.
+For other operations: Smart context gathering, then precise execution.
+Always prefer helpful action over endless questions.`,
       messages,
-      temperature: 0.2, // Lower temperature for more deterministic operations
+      experimental_telemetry: {
+        isEnabled: true,
+        metadata: {
+          ls_run_name: "chat-session",
+          client_locale: clientEnv?.locale || "unknown",
+          client_timezone: clientEnv?.timeZone || "unknown",
+        },
+      },
+      temperature: 0.4, // Balanced temperature for proactive yet accurate operations
       tools: {
         list_tables: tool({
           description:
@@ -481,32 +509,37 @@ Be professional, execute requests immediately, and provide specific insights bas
           },
         }),
 
-        smart_add_column: tool({
+        add_column: tool({
           description:
-            "Add a column with optional per-row formula. Placement is handled client-side: it will be inserted immediately after the active/primary data region.",
+            "Add a column at the specified location. Requires exact sheet name and precise column position.",
           parameters: z.object({
+            sheetName: z
+              .string()
+              .describe("Exact sheet name where to add the column"),
             columnName: z
               .string()
               .describe(
                 "Name for the new column header (e.g., 'Price per kg')"
               ),
+            insertAtColumn: z
+              .string()
+              .describe("Exact column letter where to insert (e.g., 'D' to insert at column D)"),
             formulaPattern: z
               .string()
               .optional()
               .describe(
-                "Formula pattern with {row} placeholder (e.g., '=E{row}/D{row}' for Price/Weight). System will auto-detect correct columns if not provided."
+                "Exact formula pattern with {row} placeholder (e.g., '=E{row}/D{row}' for Price/Weight)"
               ),
             defaultValue: z
               .union([z.string(), z.number()])
               .optional()
-              .describe("Default value if no formula"),
+              .describe("ONLY provide this if user explicitly requests default values. Do NOT provide zero or empty defaults unless specifically requested."),
           }),
           execute: async (params) => {
             return {
-              message:
-                "🧠 Getting REAL sheet context to find the perfect column location...",
+              message: `Adding column '${params.columnName}' at column ${params.insertAtColumn} in sheet '${params.sheetName}'`,
               clientSideAction: {
-                type: "smartAddColumnWithContext",
+                type: "addColumn",
                 params,
               },
             };
@@ -529,87 +562,65 @@ Be professional, execute requests immediately, and provide specific insights bas
           },
         }),
 
-        get_current_workbook_state: tool({
+        get_workbook_state: tool({
           description:
-            "Get the REAL current state of workbook - no assumptions, pure intelligence",
+            "Get the current state of all sheets in the workbook using Univer APIs.",
           parameters: z.object({
             includeAllSheets: z
               .boolean()
               .optional()
               .default(true)
-              .describe("Analyze all sheets or just active"),
-            includeSelection: z
-              .boolean()
-              .optional()
-              .default(true)
-              .describe("Include current selection analysis"),
+              .describe("Include all sheets or just active sheet"),
           }),
           execute: async ({
             includeAllSheets = true,
-            includeSelection = true,
           }) => {
             return {
-              message:
-                "🔍 Analyzing real workbook state - no hardcoded assumptions...",
+              message: "Getting workbook state via Univer APIs...",
               clientSideAction: {
-                type: "getCleanWorkbookState",
-                params: { includeAllSheets, includeSelection },
+                type: "getWorkbookState",
+                params: { includeAllSheets },
               },
             };
           },
         }),
 
-        get_active_sheet_context: tool({
+        get_sheet_data: tool({
           description:
-            "Get REAL active sheet context - actual data boundaries, real table structures, true spatial awareness",
+            "Get data from a specific sheet and range using Univer APIs.",
           parameters: z.object({
-            analyzeDataRegions: z
-              .boolean()
-              .optional()
-              .default(true)
-              .describe("Detect all data regions intelligently"),
-            findEmptyAreas: z
-              .boolean()
-              .optional()
-              .default(true)
-              .describe("Find actual empty areas for placement"),
+            sheetName: z
+              .string()
+              .describe("Exact sheet name to query"),
+            range: z
+              .string()
+              .describe("Exact range to get data from (e.g., 'A1:E20')"),
           }),
-          execute: async ({
-            analyzeDataRegions = true,
-            findEmptyAreas = true,
-          }) => {
+          execute: async ({ sheetName, range }) => {
             return {
-              message:
-                "🧠 Analyzing real sheet structure - no hardcoded ranges...",
+              message: `Getting data from range ${range} in sheet '${sheetName}'`,
               clientSideAction: {
-                type: "getCleanSheetContext",
-                params: { analyzeDataRegions, findEmptyAreas },
+                type: "getSheetData",
+                params: { sheetName, range },
               },
             };
           },
         }),
 
-        get_selection_context: tool({
+        get_selection_data: tool({
           description:
-            "Analyze REAL selection - actual values, true intent, intelligent suggestions based on current context",
+            "Get the current selection data from the active sheet using Univer APIs.",
           parameters: z.object({
-            analyzeIntent: z
-              .boolean()
-              .optional()
-              .default(true)
-              .describe("Determine user intent from selection"),
-            findRelatedData: z
-              .boolean()
-              .optional()
-              .default(true)
-              .describe("Find related data structures"),
+            sheetName: z
+              .string()
+              .describe("Exact sheet name where selection is located"),
           }),
-          execute: async ({ analyzeIntent = true, findRelatedData = true }) => {
+          execute: async ({ sheetName }) => {
             return {
-              message: "🎯 Analyzing real selection intent - no assumptions...",
+              message: `Getting selection data from sheet '${sheetName}'`,
               clientSideAction: {
-                type: "getCleanSelectionContext",
-                params: { analyzeIntent, findRelatedData },
+                type: "getSelectionData",
+                params: { sheetName },
               },
             };
           },
@@ -912,205 +923,149 @@ Be professional, execute requests immediately, and provide specific insights bas
         }),
 
         create_pivot_table: tool({
-          description: "Create a pivot table with grouping and aggregation",
+          description: "Create a pivot table from exact source range to exact destination.",
           parameters: z.object({
-            groupBy: z
+            sourceSheetName: z
               .string()
-              .describe("Column to group by (e.g., 'Date' or 'Region')"),
+              .describe("Exact sheet name containing source data"),
+            sourceRange: z
+              .string()
+              .describe("Exact source data range including headers (e.g., 'A1:D20')"),
+            groupByColumn: z
+              .string()
+              .describe("Exact column letter or name to group by (e.g., 'A' or 'Date')"),
             valueColumn: z
               .string()
-              .describe(
-                "Column to aggregate (e.g., 'Search_Volume' or 'Sales')"
-              ),
-            aggFunc: z
+              .describe("Exact column letter or name to aggregate (e.g., 'C' or 'Sales')"),
+            aggregateFunction: z
               .enum(["sum", "average", "count", "max", "min"])
               .describe("Aggregation function"),
-            destination: z
+            destinationSheetName: z
               .string()
-              .optional()
-              .describe("Destination range (e.g., 'D1' or 'Sheet2!A1')"),
-            sheetName: z
+              .describe("Exact sheet name for pivot table output"),
+            destinationCell: z
               .string()
-              .optional()
-              .describe(
-                "Optional sheet name to create/use for the pivot table"
-              ),
-            data_range: z
-              .string()
-              .optional()
-              .describe("Optional source range like 'H1:I20'"),
-            tableId: z
-              .string()
-              .optional()
-              .describe(
-                "Stable tableId from list_tables: '<sheetIndex>:<range>'"
-              ),
+              .describe("Exact cell where pivot table starts (e.g., 'F1')"),
           }),
           execute: async ({
-            groupBy,
+            sourceSheetName,
+            sourceRange,
+            groupByColumn,
             valueColumn,
-            aggFunc,
-            destination,
-            sheetName,
-            data_range,
-            tableId,
+            aggregateFunction,
+            destinationSheetName,
+            destinationCell,
           }) => {
             return {
-              message: `Creating pivot table grouping by '${groupBy}' with ${aggFunc} of '${valueColumn}'...`,
+              message: `Creating pivot table from '${sourceSheetName}'!${sourceRange} at '${destinationSheetName}'!${destinationCell}`,
               clientSideAction: {
-                type: "executeUniverTool",
-                toolName: "create_pivot_table",
+                type: "createPivotTable",
                 params: {
-                  groupBy,
+                  sourceSheetName,
+                  sourceRange,
+                  groupByColumn,
                   valueColumn,
-                  aggFunc,
-                  destination,
-                  sheetName,
-                  data_range,
-                  tableId,
+                  aggregateFunction,
+                  destinationSheetName,
+                  destinationCell,
                 },
               },
             };
           },
         }),
 
-        calculate_total: tool({
-          description: "Calculate total for a specific column",
+        set_formula: tool({
+          description: "Set a formula in an exact cell location using Univer APIs.",
           parameters: z.object({
-            column: z
+            sheetName: z
               .string()
-              .describe("Column name or letter (e.g., 'Sales' or 'B')"),
-            data_range: z
+              .describe("Exact sheet name containing the target cell"),
+            cell: z
               .string()
-              .optional()
-              .describe("Optional source range like 'H1:I20'"),
-            tableId: z
+              .describe("Exact cell reference (e.g., 'C15')"),
+            formula: z
               .string()
-              .optional()
-              .describe(
-                "Stable tableId from list_tables: '<sheetIndex>:<range>'"
-              ),
+              .describe("Exact formula (e.g., '=SUM(C2:C14)')"),
           }),
-          execute: async ({ column, data_range, tableId }) => {
+          execute: async ({ sheetName, cell, formula }) => {
             return {
-              message: `Calculating total for column ${column}...`,
+              message: `Setting formula ${formula} in cell ${cell} of sheet '${sheetName}'`,
               clientSideAction: {
-                type: "executeUniverTool",
-                toolName: "calculate_total",
-                params: { column, data_range, tableId },
+                type: "setFormula",
+                params: { sheetName, cell, formula },
               },
             };
           },
         }),
 
-        add_smart_totals: tool({
-          description: `Intelligently add totals to multiple numeric/calculable columns in a table.
-
-- Automatically detects which columns are calculable (numeric, currency, or have calculable names like "Price", "Weight", etc.)
-- Can add totals to all calculable columns at once or specific columns
-- Places SUM formulas below the data table in the appropriate columns
-- Perfect for "add totals" requests where the user wants totals for all relevant columns
-
-When to use:
-- User asks "add totals" without specifying columns
-- User wants totals for multiple columns  
-- User asks to "calculate totals for all numeric columns"
-
-IMPORTANT: This tool leverages intelligent table analysis from get_workbook_snapshot to automatically identify calculable columns and optimal placement.`,
+        add_totals: tool({
+          description: "Add SUM formulas to specific columns at exact cell locations.",
           parameters: z.object({
-            columns: z
-              .array(z.string())
-              .optional()
-              .describe(
-                "Optional array of specific column names or letters to total"
-              ),
-            tableId: z
+            sheetName: z
               .string()
-              .optional()
-              .describe("Specific table ID if multiple tables exist"),
+              .describe("Exact sheet name where to add totals"),
+            totals: z
+              .array(z.object({
+                column: z.string().describe("Exact column letter (e.g., 'C')"),
+                targetCell: z.string().describe("Exact cell where to place the SUM formula (e.g., 'C15')"),
+                dataRange: z.string().describe("Exact range to sum (e.g., 'C2:C14')"),
+              }))
+              .min(1)
+              .describe("Array of total specifications with exact locations"),
           }),
-          execute: async ({ columns, tableId }) => {
+          execute: async ({ sheetName, totals }) => {
             return {
-              message: `Adding smart totals${
-                columns
-                  ? ` for ${columns.join(", ")}`
-                  : " for all calculable columns"
-              }...`,
+              message: `Adding totals to ${totals.length} columns in sheet '${sheetName}'`,
               clientSideAction: {
-                type: "executeUniverTool",
-                toolName: "add_smart_totals",
-                params: { columns, tableId },
+                type: "addTotalsAtLocations",
+                params: { sheetName, totals },
               },
             };
           },
         }),
 
-        generate_chart: tool({
-          description: "Generate native Univer chart from spreadsheet data",
+        create_chart: tool({
+          description: "Create a chart from exact data range and position.",
           parameters: z.object({
-            data_range: z
+            sheetName: z
               .string()
-              .optional()
-              .describe(
-                "Data range (e.g., 'A1:B18') - if not provided, will auto-detect data"
-              ),
-            x_column: z
+              .describe("Exact sheet name containing the data"),
+            dataRange: z
               .string()
-              .optional()
-              .describe(
-                "Optional X-axis column header (e.g., 'Date'). When provided, restrict chart to this X column."
-              ),
-            y_columns: z
-              .union([z.string(), z.array(z.string())])
-              .optional()
-              .describe(
-                "Optional Y-axis column header(s). When provided, restrict chart to these Y columns."
-              ),
-            tableId: z
-              .string()
-              .optional()
-              .describe(
-                "Stable tableId from list_tables: '<sheetIndex>:<range>'"
-              ),
-            chart_type: z
+              .describe("Exact data range including headers (e.g., 'A1:C10')"),
+            chartType: z
               .enum(["column", "line", "pie", "bar", "scatter"])
-              .describe("Chart type - column, line, pie, bar, or scatter"),
+              .describe("Chart type"),
             title: z.string().describe("Chart title"),
             position: z
               .string()
-              .optional()
-              .describe("Chart position cell (e.g., 'D1')"),
+              .describe("Exact cell position for chart (e.g., 'F1')"),
             width: z
               .number()
-              .optional()
-              .describe("Chart width in pixels (default: 400)"),
+              .default(400)
+              .describe("Chart width in pixels"),
             height: z
               .number()
-              .optional()
-              .describe("Chart height in pixels (default: 300)"),
+              .default(300)
+              .describe("Chart height in pixels"),
           }),
           execute: async ({
-            data_range,
-            x_column,
-            y_columns,
-            tableId,
-            chart_type,
+            sheetName,
+            dataRange,
+            chartType,
             title,
             position,
-            width = 400,
-            height = 300,
+            width,
+            height,
           }) => {
             return {
-              message: `Creating ${chart_type} chart "${title}"...`,
+              message: `Creating ${chartType} chart "${title}" at ${position} from data ${dataRange}`,
               clientSideAction: {
-                type: "executeUniverTool",
-                toolName: "generate_chart",
+                type: "createChart",
                 params: {
-                  data_range,
-                  x_column,
-                  y_columns,
-                  tableId,
-                  chart_type,
+                  sheetName,
+                  dataRange,
+                  chartType,
                   title,
                   position,
                   width,
@@ -1152,20 +1107,16 @@ IMPORTANT: This tool leverages intelligent table analysis from get_workbook_snap
           },
         }),
 
-        format_recent_totals: tool({
-          description: `Intelligently format recently added totals with currency formatting.
-
-- Automatically detects and formats currency/price-related totals from recent add_smart_totals operations
-- Identifies columns like "Price", "Cost", "Amount", "Revenue", "Value" automatically
-- Perfect for requests like "format totals in USD" after adding totals
-
-When to use:
-- User asks to "format totals" or "format totals in USD" after adding totals
-- User wants to apply currency formatting to recent calculations
-- User asks to "make the price total show as dollars"
-
-IMPORTANT: This tool understands the context of recently added totals and intelligently selects only currency-relevant ones.`,
+        format_currency_range: tool({
+          description: "Format exact cell ranges with currency formatting.",
           parameters: z.object({
+            sheetName: z
+              .string()
+              .describe("Exact sheet name containing the cells"),
+            ranges: z
+              .array(z.string())
+              .min(1)
+              .describe("Array of exact cell ranges to format (e.g., ['C15', 'D15:D20'])"),
             currency: z
               .string()
               .default("USD")
@@ -1174,135 +1125,52 @@ IMPORTANT: This tool understands the context of recently added totals and intell
               .number()
               .default(2)
               .describe("Number of decimal places"),
-            columnPattern: z
-              .string()
-              .optional()
-              .describe(
-                "Optional pattern to match specific column names (e.g., 'price' to match only price columns)"
-              ),
           }),
-          execute: async ({ currency, decimals, columnPattern }) => {
+          execute: async ({ sheetName, ranges, currency, decimals }) => {
             return {
-              message: `Formatting recent currency totals as ${currency}...`,
+              message: `Formatting ranges ${ranges.join(', ')} as ${currency} in sheet '${sheetName}'`,
               clientSideAction: {
-                type: "executeUniverTool",
-                toolName: "format_recent_totals",
-                params: { currency, decimals, columnPattern },
+                type: "formatCurrencyRanges",
+                params: { sheetName, ranges, currency, decimals },
               },
             };
           },
         }),
 
-        format_currency_column: tool({
-          description: `Intelligently format a currency/price column with proper currency formatting.
-
-- Uses workbook intelligence to identify which column contains currency data (Price, Cost, Amount, Revenue, etc.)
-- Formats the ENTIRE DATA RANGE of the identified currency column, not just totals
-- Perfect for requests like "format the column as USD" or "format the price column as currency"
-
-When to use:
-- User asks to "format the column as USD" or "format column as currency"
-- User wants to format the data values in a currency column (not just totals)
-- User refers to "the column" and context suggests they mean a price/currency column
-
-IMPORTANT: This tool uses intelligent analysis to find the most relevant currency column and formats its data range.`,
-          parameters: z.object({
-            currency: z
-              .string()
-              .default("USD")
-              .describe("Currency code (USD, EUR, GBP, JPY, etc.)"),
-            decimals: z
-              .number()
-              .default(2)
-              .describe("Number of decimal places"),
-            columnName: z
-              .string()
-              .optional()
-              .describe(
-                "Optional specific column name to format (e.g., 'Price'). If not provided, will auto-detect currency column."
-              ),
-          }),
-          execute: async ({ currency, decimals, columnName }) => {
-            return {
-              message: `Formatting currency column as ${currency}...`,
-              clientSideAction: {
-                type: "executeUniverTool",
-                toolName: "format_currency_column",
-                params: { currency, decimals, columnName },
-              },
-            };
-          },
-        }),
 
         add_filter: tool({
-          description: `Add filter dropdowns to a table (like Excel AutoFilter). Creates interactive filter controls in the header row.
-
-- Automatically detects the table range using intelligent analysis
-- Creates filter dropdowns for each column header
-- Users can then click the dropdowns to filter data interactively
-- Works with any table structure and position
-
-When to use:
-- User asks to "add filter", "add filters", "enable filtering", "create filter"
-- User wants to filter data like in Excel
-- Follow-up to table creation when filtering is needed
-
-The tool intelligently finds the table and applies filters to the entire table range including headers.`,
+          description: "Add filter dropdowns to an exact range. Creates Excel-like filter controls.",
           parameters: z.object({
-            tableId: z
+            sheetName: z
               .string()
-              .optional()
-              .describe(
-                "Optional table ID to target. If not specified, applies to the primary table detected in the sheet."
-              ),
+              .describe("Exact sheet name where to add filters"),
+            range: z
+              .string()
+              .describe("Exact range including headers (e.g., 'A1:E20')"),
           }),
-          execute: async ({ tableId }) => {
+          execute: async ({ sheetName, range }) => {
             return {
-              message: `Adding filter to table${
-                tableId ? ` ${tableId}` : ""
-              }...`,
+              message: `Adding filters to range ${range} in sheet '${sheetName}'`,
               clientSideAction: {
-                type: "executeUniverTool",
-                toolName: "add_filter",
-                params: { tableId },
+                type: "addFilter",
+                params: { sheetName, range },
               },
             };
           },
         }),
 
-        filter_data: tool({
-          description: `Filter data to show only specific values. This adds filters AND applies criteria automatically.
-
-- Creates filter dropdowns if they don't exist
-- Applies specific filter criteria to show only matching rows
-- Perfect for "show only X", "hide Y", "filter for Z" requests
-- Handles text contains, exact matches, and multiple values
-
-When to use:
-- User asks "show only deposits", "show deposits only", "filter for positive values"
-- User wants to see specific subset of data
-- User asks to hide/show certain rows based on criteria
-
-The tool intelligently detects the appropriate column and applies the filter criteria.`,
+        apply_filter: tool({
+          description: "Apply filter criteria to a specific column in an exact range.",
           parameters: z.object({
+            sheetName: z
+              .string()
+              .describe("Exact sheet name containing the data"),
+            range: z
+              .string()
+              .describe("Exact range with headers (e.g., 'A1:E20')"),
             column: z
               .string()
-              .optional()
-              .describe(
-                "Column name or letter to filter on. If not specified, will try to detect from context/values."
-              ),
-            values: z
-              .array(z.string())
-              .optional()
-              .describe(
-                "Specific values to show (exact matches). Use for 'show only Deposit' type requests."
-              ),
-            contains: z
-              .string()
-              .optional()
-              .describe(
-                "Text that values should contain. Use for partial matching."
-              ),
+              .describe("Exact column letter to filter (e.g., 'C')"),
             condition: z
               .enum([
                 "greater_than",
@@ -1312,42 +1180,17 @@ The tool intelligently detects the appropriate column and applies the filter cri
                 "contains",
                 "not_contains",
               ])
-              .optional()
-              .describe("Condition type for filtering."),
-            conditionValue: z
+              .describe("Filter condition type"),
+            value: z
               .union([z.string(), z.number()])
-              .optional()
-              .describe("Value to compare against for conditions."),
-            tableId: z
-              .string()
-              .optional()
-              .describe(
-                "Optional table ID to target. If not specified, applies to the primary table."
-              ),
+              .describe("Value to compare against"),
           }),
-          execute: async ({
-            column,
-            values,
-            contains,
-            condition,
-            conditionValue,
-            tableId,
-          }) => {
+          execute: async ({ sheetName, range, column, condition, value }) => {
             return {
-              message: `Filtering data${column ? ` in column ${column}` : ""}${
-                values ? ` to show: ${values.join(", ")}` : ""
-              }${contains ? ` containing: ${contains}` : ""}...`,
+              message: `Applying filter to column ${column} in range ${range} (${condition}: ${value})`,
               clientSideAction: {
-                type: "executeUniverTool",
-                toolName: "filter_data",
-                params: {
-                  column,
-                  values,
-                  contains,
-                  condition,
-                  conditionValue,
-                  tableId,
-                },
+                type: "applyFilter",
+                params: { sheetName, range, column, condition, value },
               },
             };
           },
@@ -1642,9 +1485,9 @@ The tool intelligently detects the appropriate column and applies the filter cri
           },
         }),
 
-        auto_fit_columns: tool({
+        fit_columns: tool({
           description:
-            "Auto-fit one or more columns to their content width (like double-clicking column edge in Excel)",
+            "Fit one or more columns to their content width (like double-clicking column edge in Excel)",
           parameters: z.object({
             columns: z
               .string()
@@ -1661,10 +1504,10 @@ The tool intelligently detects the appropriate column and applies the filter cri
           }),
           execute: async ({ columns, rowsSampleLimit = 1000 }) => {
             return {
-              message: `Auto-fitting columns ${columns}...`,
+              message: `Fitting columns ${columns}...`,
               clientSideAction: {
                 type: "executeUniverTool",
-                toolName: "auto_fit_columns",
+                toolName: "fit_columns",
                 params: { columns, rowsSampleLimit },
               },
             };
